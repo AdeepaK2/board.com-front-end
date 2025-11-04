@@ -47,6 +47,7 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [username, setUsername] = useState('');
+  const [serverUrl, setServerUrl] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [users, setUsers] = useState<string[]>([]);
   const [currentPoints, setCurrentPoints] = useState<DrawPoint[]>([]);
@@ -54,6 +55,25 @@ function App() {
   const [brushSize, setBrushSize] = useState(2);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
+
+  // Auto-detect WebSocket URL based on current page URL
+  useEffect(() => {
+    const autoDetectUrl = () => {
+      // If VITE_WEBSOCKET_URL is set, use it
+      if (import.meta.env.VITE_WEBSOCKET_URL) {
+        return import.meta.env.VITE_WEBSOCKET_URL;
+      }
+      
+      // Auto-detect from current page URL
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname;
+      const port = '8080';
+      
+      return `${protocol}//${host}:${port}`;
+    };
+    
+    setServerUrl(autoDetectUrl());
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -87,13 +107,12 @@ function App() {
       return;
     }
 
+    const wsUrlToUse = serverUrl || 'ws://localhost:8080';
+    
     setConnectionStatus('Connecting...');
-    // Use environment variable for WebSocket URL, fallback to same domain for production
-    const wsUrl = import.meta.env.VITE_WEBSOCKET_URL || 
-                  (window.location.protocol === 'https:' ? 
-                   `wss://${window.location.host}/ws` : 
-                   'ws://localhost:8080');
-    const ws = new WebSocket(wsUrl);
+    console.log('Connecting to:', wsUrlToUse);
+    
+    const ws = new WebSocket(wsUrlToUse);
     
     ws.onopen = () => {
       console.log('Connected to server');
@@ -324,6 +343,16 @@ function App() {
             onKeyPress={(e) => e.key === 'Enter' && connectToServer()}
             maxLength={20}
           />
+          <div className="server-url-input">
+            <label>Server URL (auto-detected):</label>
+            <input
+              type="text"
+              placeholder="ws://server-ip:8080"
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+              title="WebSocket server URL. Auto-detected from your current page URL."
+            />
+          </div>
           <button onClick={connectToServer} disabled={!username.trim()}>
             Join Whiteboard
           </button>
@@ -332,7 +361,8 @@ function App() {
           Status: {connectionStatus}
         </div>
         <div className="instructions">
-          <p>💡 Make sure the Java WebSocket server is running on port 8080</p>
+          <p>💡 Server URL is auto-detected based on your current page</p>
+          <p>🌐 Access from other devices: Use your IP address in browser</p>
           <p>🖱️ Use mouse to draw, select colors and brush sizes</p>
           <p>👥 See other users draw in real-time with their cursors</p>
         </div>
