@@ -486,11 +486,12 @@ function App() {
             {connectionStatus}
           </div>
           <div className="instructions">
-            <h3>How it works:</h3>
-            <p>� Other devices can access using your network IP</p>
+            <h3>✨ How it works:</h3>
+            <p>📡 Share the server address with others on your local network</p>
             <p>🎨 Create your own whiteboard room or join existing ones</p>
-            <p>👥 See everyone drawing in real-time</p>
-            <p>🖱️ Draw with different colors and brush sizes</p>
+            <p>👥 Collaborate with multiple users in real-time</p>
+            <p>🖱️ Draw freely with customizable colors and brush sizes</p>
+            <p>💾 Room history is preserved while you're connected</p>
           </div>
         </div>
       </div>
@@ -532,7 +533,10 @@ function App() {
             <h2>Available Rooms ({rooms.length})</h2>
             {rooms.length === 0 ? (
               <div className="no-rooms">
-                <p>No rooms available. Create one to get started!</p>
+                <p>🎨 No active rooms yet</p>
+                <p style={{fontSize: '15px', marginTop: '10px', color: '#aaa'}}>
+                  Be the first to create a whiteboard room!
+                </p>
               </div>
             ) : (
               <div className="room-cards">
