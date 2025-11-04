@@ -25,6 +25,7 @@ interface CursorMessage {
 interface UserMessage {
   type: 'userJoined' | 'userLeft';
   username: string;
+  roomId: string;
 }
 
 interface ClearMessage {
@@ -32,7 +33,38 @@ interface ClearMessage {
   username: string;
 }
 
-type WebSocketMessage = DrawMessage | UserMessage | ClearMessage | CursorMessage;
+interface RoomInfo {
+  roomId: string;
+  roomName: string;
+  creator: string;
+  participants: number;
+  maxParticipants: number;
+}
+
+interface RoomListMessage {
+  type: 'roomList';
+  rooms: RoomInfo[];
+}
+
+interface RoomCreatedMessage {
+  type: 'roomCreated';
+  roomId: string;
+  roomName: string;
+}
+
+interface RoomJoinedMessage {
+  type: 'roomJoined';
+  roomId: string;
+  roomName: string;
+}
+
+interface ErrorMessage {
+  type: 'error';
+  message: string;
+}
+
+type WebSocketMessage = DrawMessage | UserMessage | ClearMessage | CursorMessage | 
+                        RoomListMessage | RoomCreatedMessage | RoomJoinedMessage | ErrorMessage;
 
 interface UserCursor {
   x: number;
@@ -42,19 +74,27 @@ interface UserCursor {
   lastUpdate: number;
 }
 
+type AppView = 'login' | 'roomList' | 'whiteboard';
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [view, setView] = useState<AppView>('login');
   const [isDrawing, setIsDrawing] = useState(false);
   const [username, setUsername] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const [users, setUsers] = useState<string[]>([]);
   const [currentPoints, setCurrentPoints] = useState<DrawPoint[]>([]);
   const [brushColor, setBrushColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(2);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
+  
+  // Room management
+  const [rooms, setRooms] = useState<RoomInfo[]>([]);
+  const [currentRoom, setCurrentRoom] = useState<RoomInfo | null>(null);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
 
   // Auto-detect WebSocket URL based on current page URL
   useEffect(() => {
@@ -118,7 +158,10 @@ function App() {
       console.log('Connected to server');
       setIsConnected(true);
       setConnectionStatus('Connected');
-      ws.send(JSON.stringify({ type: 'join', username: username.trim() }));
+      setView('roomList');
+      
+      // Request room list
+      ws.send(JSON.stringify({ type: 'getRooms' }));
     };
 
     ws.onmessage = (event) => {
@@ -126,6 +169,15 @@ function App() {
         const data: WebSocketMessage = JSON.parse(event.data);
         
         switch (data.type) {
+          case 'roomList':
+            handleRoomList(data);
+            break;
+          case 'roomCreated':
+            handleRoomCreated(data);
+            break;
+          case 'roomJoined':
+            handleRoomJoined(data);
+            break;
           case 'draw':
             drawOnCanvas(data.points);
             break;
@@ -133,12 +185,10 @@ function App() {
             handleCursorUpdate(data);
             break;
           case 'userJoined':
-            setUsers(prev => [...prev.filter(u => u !== data.username), data.username]);
             setConnectionStatus(`${data.username} joined`);
             setTimeout(() => setConnectionStatus('Connected'), 2000);
             break;
           case 'userLeft':
-            setUsers(prev => prev.filter(u => u !== data.username));
             setUserCursors(prev => {
               const newCursors = new Map(prev);
               newCursors.delete(data.username);
@@ -152,6 +202,9 @@ function App() {
             setConnectionStatus(`Canvas cleared by ${data.username}`);
             setTimeout(() => setConnectionStatus('Connected'), 2000);
             break;
+          case 'error':
+            alert(data.message);
+            break;
         }
       } catch (error) {
         console.error('Error parsing message:', error);
@@ -162,7 +215,8 @@ function App() {
       console.log('Disconnected from server');
       setIsConnected(false);
       setConnectionStatus('Disconnected');
-      setUsers([]);
+      setView('login');
+      setCurrentRoom(null);
       setUserCursors(new Map());
     };
 
@@ -172,6 +226,77 @@ function App() {
     };
 
     wsRef.current = ws;
+  };
+
+  const handleRoomList = (data: RoomListMessage) => {
+    setRooms(data.rooms);
+  };
+
+  const handleRoomCreated = (data: RoomCreatedMessage) => {
+    const newRoom: RoomInfo = {
+      roomId: data.roomId,
+      roomName: data.roomName,
+      creator: username,
+      participants: 1,
+      maxParticipants: 50
+    };
+    setCurrentRoom(newRoom);
+    setView('whiteboard');
+    setShowCreateRoom(false);
+    setNewRoomName('');
+  };
+
+  const handleRoomJoined = (data: RoomJoinedMessage) => {
+    const room = rooms.find(r => r.roomId === data.roomId);
+    if (room) {
+      setCurrentRoom(room);
+    } else {
+      setCurrentRoom({
+        roomId: data.roomId,
+        roomName: data.roomName,
+        creator: '',
+        participants: 1,
+        maxParticipants: 50
+      });
+    }
+    setView('whiteboard');
+    clearCanvas(); // Clear canvas when joining new room
+  };
+
+  const createRoom = () => {
+    if (!newRoomName.trim()) {
+      alert('Please enter a room name');
+      return;
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'createRoom',
+        username: username,
+        roomName: newRoomName.trim()
+      }));
+    }
+  };
+
+  const joinRoom = (roomId: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'joinRoom',
+        username: username,
+        roomId: roomId
+      }));
+    }
+  };
+
+  const leaveRoom = () => {
+    setView('roomList');
+    setCurrentRoom(null);
+    clearCanvas();
+    
+    // Request updated room list
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'getRooms' }));
+    }
   };
 
   const handleCursorUpdate = (data: CursorMessage) => {
@@ -332,39 +457,110 @@ function App() {
   if (!isConnected) {
     return (
       <div className="login-container">
-        <h1>🎨 Live Whiteboard</h1>
-        <p>Enter your name to join the collaborative whiteboard</p>
-        <div className="login-form">
-          <input
-            type="text"
-            placeholder="Enter your name"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && connectToServer()}
-            maxLength={20}
-          />
-          <div className="server-url-input">
-            <label>Server URL (auto-detected):</label>
+        <div className="login-card">
+          <h1>🎨 Collaborative Whiteboard</h1>
+          <p>Create or join whiteboard rooms on your local network</p>
+          <div className="login-form">
             <input
               type="text"
-              placeholder="ws://server-ip:8080"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              title="WebSocket server URL. Auto-detected from your current page URL."
+              placeholder="Enter your name"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && connectToServer()}
+              maxLength={20}
             />
+            <div className="server-url-input">
+              <label>Server Address:</label>
+              <input
+                type="text"
+                placeholder="ws://server-ip:8080"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+              />
+            </div>
+            <button onClick={connectToServer} disabled={!username.trim()}>
+              Connect to Server
+            </button>
           </div>
-          <button onClick={connectToServer} disabled={!username.trim()}>
-            Join Whiteboard
-          </button>
+          <div className="connection-status">
+            {connectionStatus}
+          </div>
+          <div className="instructions">
+            <h3>✨ How it works:</h3>
+            <p>📡 Share the server address with others on your local network</p>
+            <p>🎨 Create your own whiteboard room or join existing ones</p>
+            <p>👥 Collaborate with multiple users in real-time</p>
+            <p>🖱️ Draw freely with customizable colors and brush sizes</p>
+            <p>💾 Room history is preserved while you're connected</p>
+          </div>
         </div>
-        <div className="connection-status">
-          Status: {connectionStatus}
+      </div>
+    );
+  }
+
+  if (view === 'roomList') {
+    return (
+      <div className="room-list-container">
+        <div className="room-list-header">
+          <h1>🎨 Whiteboard Rooms</h1>
+          <span className="username-badge">👤 {username}</span>
         </div>
-        <div className="instructions">
-          <p>💡 Server URL is auto-detected based on your current page</p>
-          <p>🌐 Access from other devices: Use your IP address in browser</p>
-          <p>🖱️ Use mouse to draw, select colors and brush sizes</p>
-          <p>👥 See other users draw in real-time with their cursors</p>
+        
+        <div className="room-list-content">
+          <div className="create-room-section">
+            {!showCreateRoom ? (
+              <button className="create-room-btn" onClick={() => setShowCreateRoom(true)}>
+                ➕ Create New Room
+              </button>
+            ) : (
+              <div className="create-room-form">
+                <input
+                  type="text"
+                  placeholder="Enter room name"
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && createRoom()}
+                  maxLength={50}
+                  autoFocus
+                />
+                <button onClick={createRoom}>Create</button>
+                <button onClick={() => { setShowCreateRoom(false); setNewRoomName(''); }}>Cancel</button>
+              </div>
+            )}
+          </div>
+
+          <div className="rooms-grid">
+            <h2>Available Rooms ({rooms.length})</h2>
+            {rooms.length === 0 ? (
+              <div className="no-rooms">
+                <p>🎨 No active rooms yet</p>
+                <p style={{fontSize: '15px', marginTop: '10px', color: '#aaa'}}>
+                  Be the first to create a whiteboard room!
+                </p>
+              </div>
+            ) : (
+              <div className="room-cards">
+                {rooms.map((room) => (
+                  <div key={room.roomId} className="room-card">
+                    <div className="room-info">
+                      <h3>{room.roomName}</h3>
+                      <p className="room-creator">Created by: {room.creator}</p>
+                      <p className="room-participants">
+                        👥 {room.participants}/{room.maxParticipants} participants
+                      </p>
+                    </div>
+                    <button 
+                      className="join-room-btn"
+                      onClick={() => joinRoom(room.roomId)}
+                      disabled={room.participants >= room.maxParticipants}
+                    >
+                      {room.participants >= room.maxParticipants ? 'Full' : 'Join Room'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -374,13 +570,13 @@ function App() {
     <div className="app">
       <div className="toolbar">
         <div className="user-info">
-          <h2>🎨 Whiteboard</h2>
+          <h2>🎨 {currentRoom?.roomName || 'Whiteboard'}</h2>
           <span className="username">👤 {username}</span>
         </div>
         
         <div className="controls">
           <label className="color-control">
-            🎨 Color:
+            Color:
             <input
               type="color"
               value={brushColor}
@@ -389,7 +585,7 @@ function App() {
           </label>
           
           <label className="size-control">
-            ✏️ Size:
+            Size:
             <input
               type="range"
               min="1"
@@ -401,18 +597,18 @@ function App() {
           </label>
           
           <button className="clear-btn" onClick={handleClearClick}>
-            🗑️ Clear All
+            Clear Canvas
+          </button>
+
+          <button className="leave-btn" onClick={leaveRoom}>
+            Leave Room
           </button>
         </div>
         
-        <div className="users-panel">
-          <h3>👥 Online ({users.length + 1})</h3>
-          <div className="users-list">
-            <div className="user current-user">👤 {username} (You)</div>
-            {users.map((user, index) => (
-              <div key={index} className="user">👤 {user}</div>
-            ))}
-          </div>
+        <div className="room-info-panel">
+          <p className="room-participants">
+            👥 {currentRoom?.participants || 1} participants
+          </p>
         </div>
       </div>
       
@@ -448,9 +644,9 @@ function App() {
       </div>
       
       <div className="status-bar">
-        <span className="status">Status: {connectionStatus}</span>
+        <span className="status">{connectionStatus}</span>
         <span className="instructions">
-          💡 Click and drag to draw • Select colors and brush sizes • See others' cursors in real-time
+          💡 Draw by clicking and dragging • Change colors and sizes • Real-time collaboration
         </span>
       </div>
     </div>
