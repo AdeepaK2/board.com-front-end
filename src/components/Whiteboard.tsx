@@ -18,6 +18,9 @@ interface WhiteboardProps {
   onMouseMove: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onMouseUp: () => void;
   onMouseLeave: () => void;
+  onTouchStart: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
 }
 
 export const Whiteboard = ({
@@ -37,6 +40,9 @@ export const Whiteboard = ({
   onMouseMove,
   onMouseUp,
   onMouseLeave,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
 }: WhiteboardProps) => {
   return (
     <div className="whiteboard-view">
@@ -106,7 +112,11 @@ export const Whiteboard = ({
             onMouseMove={onMouseMove}
             onMouseUp={onMouseUp}
             onMouseLeave={onMouseLeave}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
             className="drawing-canvas"
+            style={{ touchAction: 'none' }}
           />
 
           {/* User Cursors */}
@@ -131,7 +141,7 @@ export const Whiteboard = ({
       <div className="status-bar">
         <span className="status">{connectionStatus}</span>
         <span className="instructions">
-          💡 Draw by clicking and dragging • Change colors and sizes • Real-time collaboration
+          💡 Draw with mouse or touch • Change colors and sizes • Real-time collaboration
         </span>
       </div>
     </div>

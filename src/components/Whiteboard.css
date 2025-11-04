@@ -175,6 +175,21 @@
 .drawing-canvas {
   display: block;
   cursor: crosshair;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Touch-friendly targets */
+.btn-clear,
+.btn-leave {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.color-picker {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .user-cursor {
@@ -254,11 +269,58 @@
   }
   
   .canvas-container {
-    padding: 1rem;
+    padding: 0.5rem;
+  }
+  
+  .canvas-wrapper {
+    max-width: 100%;
+  }
+  
+  .drawing-canvas {
+    max-width: 100%;
+    height: auto;
   }
   
   .status-bar {
     flex-direction: column;
     text-align: center;
+    padding: 0.5rem 1rem;
+  }
+  
+  .instructions {
+    font-size: 0.75rem;
+  }
+  
+  /* Larger touch targets on mobile */
+  .control-item {
+    gap: 0.75rem;
+    padding: 0.5rem;
+  }
+  
+  .size-slider {
+    width: 100px;
+  }
+}
+
+/* Tablet and mobile landscape */
+@media (max-width: 1024px) {
+  .canvas-container {
+    padding: 1rem;
+  }
+  
+  .drawing-canvas {
+    max-width: 100%;
+  }
+}
+
+/* Prevent text selection while drawing on touch devices */
+@media (hover: none) and (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  .whiteboard-view {
+    user-select: none;
+    -webkit-user-select: none;
   }
 }

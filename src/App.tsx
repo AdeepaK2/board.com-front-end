@@ -284,6 +284,56 @@ function App() {
     lastPoint.current = null;
   };
 
+  // Touch event handlers for mobile/tablet support
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      setIsDrawing(true);
+      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
+    
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.strokeStyle = brushColor;
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    
+    const points = [
+      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+      { x, y, color: brushColor, size: brushSize },
+    ];
+    
+    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
+    
+    lastPoint.current = { x, y };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    setIsDrawing(false);
+    lastPoint.current = null;
+  };
+
   if (view === 'login') {
     return <LoginView onLogin={handleLogin} />;
   }
@@ -318,6 +368,9 @@ function App() {
       onMouseMove={handleMouseMove}
       onMouseUp={stopDrawing}
       onMouseLeave={stopDrawing}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     />
   );
 }
