@@ -1,5 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./App.css";
+import SaveBoardDialog from "./components/SaveBoardDialog";
+import LoadBoardDialog from "./components/LoadBoardDialog";
+import Notification from "./components/Notification";
+import { boardAPI, type Board } from "./api/boardAPI";
 
 interface DrawPoint {
   x: number;
@@ -128,6 +132,16 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [fillColor, setFillColor] = useState("#ff0000");
+
+  // Save/Load functionality
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: "success" | "error" | "info";
+  } | null>(null);
+  const [currentBoardId, setCurrentBoardId] = useState<string | null>(null);
+  const [currentBoardName, setCurrentBoardName] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -1032,6 +1046,68 @@ function App() {
     }
   };
 
+  const handleSaveBoard = async (boardName: string) => {
+    try {
+      // Always create a NEW board ID when saving (each save creates a new board)
+      const newBoardId = `board-${username}-${Date.now()}`;
+
+      const board: Board = {
+        id: newBoardId,
+        name: boardName,
+        createdBy: username,
+        createdAt: Date.now(),
+        lastModified: Date.now(),
+        strokes: strokes,
+        shapes: shapes,
+      };
+
+      const result = await boardAPI.saveBoard(board);
+      setCurrentBoardId(result.id);
+      setCurrentBoardName(boardName);
+      setNotification({
+        message: `Board "${boardName}" saved successfully!`,
+        type: "success",
+      });
+    } catch (error) {
+      setNotification({
+        message:
+          error instanceof Error ? error.message : "Failed to save board",
+        type: "error",
+      });
+    }
+  };
+
+  const handleLoadBoard = async (boardId: string) => {
+    try {
+      const board = await boardAPI.loadBoard(boardId);
+
+      // Clear current canvas
+      setStrokes([]);
+      setShapes([]);
+      setSelectedElement(null);
+      clearCanvas();
+
+      // Load board data
+      setStrokes(board.strokes);
+      setShapes(board.shapes);
+      setCurrentBoardId(board.id);
+      setCurrentBoardName(board.name);
+
+      // Redraw will happen automatically via useEffect
+
+      setNotification({
+        message: `Board "${board.name}" loaded successfully!`,
+        type: "success",
+      });
+    } catch (error) {
+      setNotification({
+        message:
+          error instanceof Error ? error.message : "Failed to load board",
+        type: "error",
+      });
+    }
+  };
+
   if (!isConnected) {
     return (
       <div className="login-container">
@@ -1145,9 +1221,29 @@ function App() {
             <span className="size-display">{brushSize}px</span>
           </label>
 
-          <button className="clear-btn" onClick={handleClearClick}>
-            🗑️ Clear All
-          </button>
+          <div className="board-controls">
+            <button
+              className="save-btn"
+              onClick={() => setShowSaveDialog(true)}
+              title="Save board"
+            >
+              💾 Save
+            </button>
+            <button
+              className="load-btn"
+              onClick={() => setShowLoadDialog(true)}
+              title="Load board"
+            >
+              📂 Load
+            </button>
+            <button
+              className="clear-btn"
+              onClick={handleClearClick}
+              title="Clear all"
+            >
+              🗑️ Clear
+            </button>
+          </div>
         </div>
 
         <div className="users-panel">
@@ -1245,7 +1341,10 @@ function App() {
       </div>
 
       <div className="status-bar">
-        <span className="status">Status: {connectionStatus}</span>
+        <span className="status">
+          Status: {connectionStatus}
+          {currentBoardName && ` • Board: ${currentBoardName}`}
+        </span>
         <span className="instructions">
           {drawMode === "select" &&
             "�️ Click to select shapes/strokes • Drag to move selected element"}
@@ -1256,6 +1355,28 @@ function App() {
             "📐 Click and drag to create shape"}
         </span>
       </div>
+
+      {/* Save/Load Dialogs */}
+      <SaveBoardDialog
+        isOpen={showSaveDialog}
+        onClose={() => setShowSaveDialog(false)}
+        onSave={handleSaveBoard}
+        username={username}
+      />
+      <LoadBoardDialog
+        isOpen={showLoadDialog}
+        onClose={() => setShowLoadDialog(false)}
+        onLoad={handleLoadBoard}
+      />
+
+      {/* Notification */}
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
     </div>
   );
 }
