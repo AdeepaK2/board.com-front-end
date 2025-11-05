@@ -197,14 +197,41 @@ body {
   border: 1px solid #ddd;
 }
 
-.clear-btn {
+/* Board control buttons */
+.board-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.save-btn, .load-btn, .clear-btn {
   padding: 8px 16px;
-  background-color: #dc3545;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.save-btn {
+  background-color: #28a745;
+}
+
+.save-btn:hover {
+  background-color: #218838;
+}
+
+.load-btn {
+  background-color: #007bff;
+}
+
+.load-btn:hover {
+  background-color: #0056b3;
+}
+
+.clear-btn {
+  background-color: #dc3545;
 }
 
 .clear-btn:hover {
@@ -334,6 +361,45 @@ body {
   border-top: 1px solid #ddd;
   font-size: 12px;
   color: #666;
+}
+
+/* Board Controls (Save/Load/Clear buttons) */
+.board-controls {
+  display: flex;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+.save-btn {
+  padding: 8px 16px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.save-btn:hover {
+  background-color: #218838;
+}
+
+.load-btn {
+  padding: 8px 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.load-btn:hover {
+  background-color: #0056b3;
 }
 
 /* Responsive Design */
