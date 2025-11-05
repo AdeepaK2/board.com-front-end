@@ -266,6 +266,18 @@ body {
   background-color: white;
 }
 
+.drawing-canvas.select-mode {
+  cursor: pointer;
+}
+
+.drawing-canvas.select-mode.resizing {
+  cursor: nwse-resize;
+}
+
+.drawing-canvas.fill-mode {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><text y="20" font-size="20">🪣</text></svg>') 12 12, auto;
+}
+
 .drawing-canvas:hover {
   border-color: #007bff;
 }

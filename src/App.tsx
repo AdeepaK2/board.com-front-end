@@ -121,6 +121,11 @@ function App() {
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
     null
   );
+  const [hoveredElement, setHoveredElement] = useState<{
+    type: "stroke" | "shape";
+    id: string;
+  } | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [fillColor, setFillColor] = useState("#ff0000");
 
@@ -320,12 +325,17 @@ function App() {
     if (selectedElement) {
       drawSelectionHighlight();
     }
+
+    // Draw hover highlight if any
+    if (hoveredElement && drawMode === "select" && !selectedElement) {
+      drawHoverHighlight();
+    }
   };
 
   // Effect to redraw whenever strokes or shapes change
   useEffect(() => {
     redrawCanvas();
-  }, [strokes, shapes, selectedElement]);
+  }, [strokes, shapes, selectedElement, hoveredElement]);
 
   const drawOnCanvas = (points: DrawPoint[]) => {
     const canvas = canvasRef.current;
@@ -384,6 +394,58 @@ function App() {
         drawResizeHandles(shape);
       }
       ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+  };
+
+  const drawHoverHighlight = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hoveredElement) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = "#00ff00";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+
+    if (hoveredElement.type === "shape") {
+      const shape = shapes.find((s) => s.id === hoveredElement.id);
+      if (!shape) return;
+
+      ctx.beginPath();
+      if (shape.type === "rectangle" && shape.width && shape.height) {
+        const padding = 5;
+        ctx.rect(
+          shape.x - padding,
+          shape.y - padding,
+          shape.width + padding * 2,
+          shape.height + padding * 2
+        );
+      } else if (shape.type === "circle" && shape.radius) {
+        ctx.arc(shape.x, shape.y, shape.radius + 5, 0, 2 * Math.PI);
+      }
+      ctx.stroke();
+    } else if (hoveredElement.type === "stroke") {
+      const stroke = strokes.find((s) => s.id === hoveredElement.id);
+      if (!stroke || stroke.points.length === 0) return;
+
+      // Draw stroke with highlight color
+      ctx.strokeStyle = "#00ff00";
+      ctx.lineWidth = stroke.points[0].size + 4;
+      ctx.globalAlpha = 0.3;
+
+      ctx.beginPath();
+      stroke.points.forEach((point, index) => {
+        if (index === 0) {
+          ctx.moveTo(point.x, point.y);
+        } else {
+          ctx.lineTo(point.x, point.y);
+        }
+      });
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
     }
 
     ctx.setLineDash([]);
@@ -509,6 +571,22 @@ function App() {
 
     // Handle select mode
     if (drawMode === "select") {
+      // First check if we're clicking on a resize handle of the selected shape
+      if (selectedElement && selectedElement.type === "shape") {
+        const selectedShape = shapes.find((s) => s.id === selectedElement.id);
+        if (selectedShape) {
+          const handle = findResizeHandle(pos.x, pos.y, selectedShape);
+          if (handle) {
+            // Start resizing
+            setIsResizing(true);
+            setResizeHandle(handle);
+            setDragStart(pos);
+            return;
+          }
+        }
+      }
+
+      // Check if clicking on a shape or stroke
       const clickedShape = findShapeAtPosition(pos.x, pos.y);
       const clickedStroke = findStrokeAtPosition(pos.x, pos.y);
 
@@ -586,12 +664,120 @@ function App() {
     return null;
   };
 
+  const findResizeHandle = (x: number, y: number, shape: ShapeData): string | null => {
+    const handleSize = 8;
+    const threshold = handleSize;
+
+    if (shape.type === "rectangle" && shape.width && shape.height) {
+      // Define handle positions
+      const handles = {
+        "top-left": { x: shape.x, y: shape.y },
+        "top-right": { x: shape.x + shape.width, y: shape.y },
+        "bottom-left": { x: shape.x, y: shape.y + shape.height },
+        "bottom-right": { x: shape.x + shape.width, y: shape.y + shape.height },
+      };
+
+      // Check if click is near any handle
+      for (const [handleName, handlePos] of Object.entries(handles)) {
+        const distance = Math.sqrt(
+          Math.pow(x - handlePos.x, 2) + Math.pow(y - handlePos.y, 2)
+        );
+        if (distance <= threshold) {
+          return handleName;
+        }
+      }
+    } else if (shape.type === "circle" && shape.radius) {
+      // Check right handle for radius
+      const handleX = shape.x + shape.radius;
+      const handleY = shape.y;
+      const distance = Math.sqrt(
+        Math.pow(x - handleX, 2) + Math.pow(y - handleY, 2)
+      );
+      if (distance <= threshold) {
+        return "radius";
+      }
+    }
+
+    return null;
+  };
+
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasCoordinates(e);
 
     // Always send cursor updates for real-time tracking
     if (isConnected) {
       sendCursorUpdate(pos.x, pos.y, isDrawing);
+    }
+
+    // Show hover effect in select mode
+    if (drawMode === "select" && !isDragging && !isResizing) {
+      const hoveredShape = findShapeAtPosition(pos.x, pos.y);
+      const hoveredStroke = findStrokeAtPosition(pos.x, pos.y);
+
+      if (hoveredShape) {
+        setHoveredElement({ type: "shape", id: hoveredShape.id });
+      } else if (hoveredStroke) {
+        setHoveredElement({ type: "stroke", id: hoveredStroke.id });
+      } else {
+        setHoveredElement(null);
+      }
+    }
+
+    // Handle resizing shapes
+    if (isResizing && dragStart && selectedElement && resizeHandle && drawMode === "select") {
+      if (selectedElement.type === "shape") {
+        const shape = shapes.find((s) => s.id === selectedElement.id);
+        if (shape) {
+          const deltaX = pos.x - dragStart.x;
+          const deltaY = pos.y - dragStart.y;
+
+          setShapes((prev) =>
+            prev.map((s) => {
+              if (s.id === selectedElement.id) {
+                if (s.type === "rectangle" && s.width && s.height) {
+                  let newShape = { ...s };
+                  
+                  // Handle different corners
+                  switch (resizeHandle) {
+                    case "top-left":
+                      newShape.x = s.x + deltaX;
+                      newShape.y = s.y + deltaY;
+                      newShape.width = s.width - deltaX;
+                      newShape.height = s.height - deltaY;
+                      break;
+                    case "top-right":
+                      newShape.y = s.y + deltaY;
+                      newShape.width = s.width + deltaX;
+                      newShape.height = s.height - deltaY;
+                      break;
+                    case "bottom-left":
+                      newShape.x = s.x + deltaX;
+                      newShape.width = s.width - deltaX;
+                      newShape.height = s.height + deltaY;
+                      break;
+                    case "bottom-right":
+                      newShape.width = s.width + deltaX;
+                      newShape.height = s.height + deltaY;
+                      break;
+                  }
+                  
+                  return newShape;
+                } else if (s.type === "circle" && s.radius && resizeHandle === "radius") {
+                  // Calculate new radius based on distance from center
+                  const newRadius = Math.sqrt(
+                    Math.pow(pos.x - s.x, 2) + Math.pow(pos.y - s.y, 2)
+                  );
+                  return { ...s, radius: Math.max(10, newRadius) }; // Minimum radius of 10
+                }
+              }
+              return s;
+            })
+          );
+
+          setDragStart(pos);
+        }
+      }
+      return;
     }
 
     // Handle dragging selected elements
@@ -690,6 +876,28 @@ function App() {
   };
 
   const stopDrawing = () => {
+    // Handle resize stop
+    if (isResizing && selectedElement) {
+      setIsResizing(false);
+      setResizeHandle(null);
+      setDragStart(null);
+
+      // Send update to server
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const shape = shapes.find((s) => s.id === selectedElement.id);
+        if (shape) {
+          const message: UpdateMessage = {
+            type: "update",
+            elementId: selectedElement.id,
+            elementType: "shape",
+            data: shape,
+          };
+          wsRef.current.send(JSON.stringify(message));
+        }
+      }
+      return;
+    }
+
     // Handle drag stop
     if (isDragging && selectedElement) {
       setIsDragging(false);
@@ -872,10 +1080,13 @@ function App() {
             </button>
             <button
               className={`shape-btn ${drawMode === "select" ? "active" : ""}`}
-              onClick={() => setDrawMode("select")}
+              onClick={() => {
+                setDrawMode("select");
+                setSelectedElement(null); // Clear any previous selection
+              }}
               title="Select & Move"
             >
-              👆
+              �️
             </button>
             <button
               className={`shape-btn ${drawMode === "fill" ? "active" : ""}`}
@@ -937,7 +1148,11 @@ function App() {
             onMouseMove={handleMouseMove}
             onMouseUp={stopDrawing}
             onMouseLeave={handleMouseLeave}
-            className="drawing-canvas"
+            className={`drawing-canvas ${
+              drawMode === "select" ? "select-mode" : ""
+            } ${drawMode === "fill" ? "fill-mode" : ""} ${
+              isResizing ? "resizing" : ""
+            }`}
           />
 
           {/* Preview canvas for shapes */}
@@ -1007,8 +1222,13 @@ function App() {
       <div className="status-bar">
         <span className="status">Status: {connectionStatus}</span>
         <span className="instructions">
-          💡 Click and drag to draw • Select colors and brush sizes • See
-          others' cursors in real-time
+          {drawMode === "select" &&
+            "�️ Click to select shapes/strokes • Drag to move selected element"}
+          {drawMode === "fill" &&
+            "🪣 Click on a shape to fill it with the selected color"}
+          {drawMode === "free" && "✏️ Click and drag to draw freehand"}
+          {(drawMode === "rectangle" || drawMode === "circle") &&
+            "📐 Click and drag to create shape"}
         </span>
       </div>
     </div>
