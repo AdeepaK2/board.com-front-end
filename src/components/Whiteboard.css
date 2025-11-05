@@ -51,6 +51,47 @@
   gap: 1.5rem;
 }
 
+.drawing-tools {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  background: #f6f8fa;
+  border-radius: 4px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0.5rem;
+  background: white;
+  color: #586069;
+  border: 1px solid #d1d5da;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+}
+
+.tool-btn:hover {
+  background: #f6f8fa;
+  border-color: #0366d6;
+  color: #0366d6;
+}
+
+.tool-btn.active {
+  background: #0366d6;
+  border-color: #0366d6;
+  color: white;
+  box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.1);
+}
+
+.tool-btn:active {
+  transform: scale(0.95);
+}
+
 .control-item {
   display: flex;
   align-items: center;
@@ -122,6 +163,25 @@
   background: #cb2431;
 }
 
+.btn-boards {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: #0366d6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.8125rem;
+}
+
+.btn-boards:hover {
+  background: #0256c7;
+}
+
 .btn-leave {
   display: flex;
   align-items: center;
@@ -175,6 +235,21 @@
 .drawing-canvas {
   display: block;
   cursor: crosshair;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Touch-friendly targets */
+.btn-clear,
+.btn-leave {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.color-picker {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .user-cursor {
@@ -254,11 +329,58 @@
   }
   
   .canvas-container {
-    padding: 1rem;
+    padding: 0.5rem;
+  }
+  
+  .canvas-wrapper {
+    max-width: 100%;
+  }
+  
+  .drawing-canvas {
+    max-width: 100%;
+    height: auto;
   }
   
   .status-bar {
     flex-direction: column;
     text-align: center;
+    padding: 0.5rem 1rem;
+  }
+  
+  .instructions {
+    font-size: 0.75rem;
+  }
+  
+  /* Larger touch targets on mobile */
+  .control-item {
+    gap: 0.75rem;
+    padding: 0.5rem;
+  }
+  
+  .size-slider {
+    width: 100px;
+  }
+}
+
+/* Tablet and mobile landscape */
+@media (max-width: 1024px) {
+  .canvas-container {
+    padding: 1rem;
+  }
+  
+  .drawing-canvas {
+    max-width: 100%;
+  }
+}
+
+/* Prevent text selection while drawing on touch devices */
+@media (hover: none) and (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  .whiteboard-view {
+    user-select: none;
+    -webkit-user-select: none;
   }
 }
