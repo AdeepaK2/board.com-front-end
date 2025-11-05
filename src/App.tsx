@@ -8,7 +8,14 @@ interface DrawPoint {
   size: number;
 }
 
+interface DrawStroke {
+  id: string;
+  points: DrawPoint[];
+  username: string;
+}
+
 interface ShapeData {
+  id: string;
   type: "rectangle" | "circle";
   x: number;
   y: number;
@@ -17,18 +24,30 @@ interface ShapeData {
   radius?: number;
   color: string;
   size: number;
+  fillColor?: string;
+  username: string;
 }
 
 interface DrawMessage {
   type: "draw";
-  points: DrawPoint[];
-  username: string;
+  stroke: DrawStroke;
 }
 
 interface ShapeMessage {
   type: "shape";
   shape: ShapeData;
-  username: string;
+}
+
+interface UpdateMessage {
+  type: "update";
+  elementId: string;
+  elementType: "stroke" | "shape";
+  data: Partial<DrawStroke> | Partial<ShapeData>;
+}
+
+interface DeleteMessage {
+  type: "delete";
+  elementId: string;
 }
 
 interface CursorMessage {
@@ -54,7 +73,9 @@ type WebSocketMessage =
   | UserMessage
   | ClearMessage
   | CursorMessage
-  | ShapeMessage;
+  | ShapeMessage
+  | UpdateMessage
+  | DeleteMessage;
 
 interface UserCursor {
   x: number;
@@ -78,14 +99,30 @@ function App() {
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(
     new Map()
   );
-  const [drawMode, setDrawMode] = useState<"free" | "rectangle" | "circle">(
-    "free"
-  );
+  const [drawMode, setDrawMode] = useState<
+    "free" | "rectangle" | "circle" | "select" | "fill"
+  >("free");
   const [shapeStartPos, setShapeStartPos] = useState<{
     x: number;
     y: number;
   } | null>(null);
   const [previewShape, setPreviewShape] = useState<ShapeData | null>(null);
+
+  // Store all drawing elements
+  const [strokes, setStrokes] = useState<DrawStroke[]>([]);
+  const [shapes, setShapes] = useState<ShapeData[]>([]);
+
+  // Selection and interaction
+  const [selectedElement, setSelectedElement] = useState<{
+    type: "stroke" | "shape";
+    id: string;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  const [fillColor, setFillColor] = useState("#ff0000");
 
   useEffect(() => {
     return () => {
@@ -142,10 +179,18 @@ function App() {
 
         switch (data.type) {
           case "draw":
-            drawOnCanvas(data.points);
+            setStrokes((prev) => [...prev, data.stroke]);
+            redrawCanvas();
             break;
           case "shape":
-            drawShapeOnCanvas(data.shape);
+            setShapes((prev) => [...prev, data.shape]);
+            redrawCanvas();
+            break;
+          case "update":
+            handleUpdateMessage(data);
+            break;
+          case "delete":
+            handleDeleteMessage(data);
             break;
           case "cursor":
             handleCursorUpdate(data);
@@ -169,6 +214,8 @@ function App() {
             setTimeout(() => setConnectionStatus("Connected"), 2000);
             break;
           case "clear":
+            setStrokes([]);
+            setShapes([]);
             clearCanvas();
             setConnectionStatus(`Canvas cleared by ${data.username}`);
             setTimeout(() => setConnectionStatus("Connected"), 2000);
@@ -211,6 +258,75 @@ function App() {
     }
   };
 
+  const redrawCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw all strokes
+    strokes.forEach((stroke) => {
+      if (stroke.points.length === 0) return;
+      ctx.strokeStyle = stroke.points[0].color;
+      ctx.lineWidth = stroke.points[0].size;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      stroke.points.forEach((point, index) => {
+        if (index === 0) {
+          ctx.moveTo(point.x, point.y);
+        } else {
+          ctx.lineTo(point.x, point.y);
+        }
+      });
+      ctx.stroke();
+    });
+
+    // Draw all shapes
+    shapes.forEach((shape) => {
+      ctx.strokeStyle = shape.color;
+      ctx.lineWidth = shape.size;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      // Fill if has fillColor
+      if (shape.fillColor) {
+        ctx.fillStyle = shape.fillColor;
+      }
+
+      ctx.beginPath();
+      if (
+        shape.type === "rectangle" &&
+        shape.width !== undefined &&
+        shape.height !== undefined
+      ) {
+        ctx.rect(shape.x, shape.y, shape.width, shape.height);
+      } else if (shape.type === "circle" && shape.radius !== undefined) {
+        ctx.arc(shape.x, shape.y, shape.radius, 0, 2 * Math.PI);
+      }
+
+      if (shape.fillColor) {
+        ctx.fill();
+      }
+      ctx.stroke();
+    });
+
+    // Draw selection highlight if any
+    if (selectedElement) {
+      drawSelectionHighlight();
+    }
+  };
+
+  // Effect to redraw whenever strokes or shapes change
+  useEffect(() => {
+    redrawCanvas();
+  }, [strokes, shapes, selectedElement]);
+
   const drawOnCanvas = (points: DrawPoint[]) => {
     const canvas = canvasRef.current;
     if (!canvas || points.length === 0) return;
@@ -234,29 +350,104 @@ function App() {
     ctx.stroke();
   };
 
-  const drawShapeOnCanvas = (shape: ShapeData) => {
+  const drawSelectionHighlight = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !selectedElement) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = "#0080ff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+
+    if (selectedElement.type === "shape") {
+      const shape = shapes.find((s) => s.id === selectedElement.id);
+      if (!shape) return;
+
+      ctx.beginPath();
+      if (shape.type === "rectangle" && shape.width && shape.height) {
+        const padding = 10;
+        ctx.rect(
+          shape.x - padding,
+          shape.y - padding,
+          shape.width + padding * 2,
+          shape.height + padding * 2
+        );
+
+        // Draw resize handles
+        drawResizeHandles(shape);
+      } else if (shape.type === "circle" && shape.radius) {
+        ctx.arc(shape.x, shape.y, shape.radius + 10, 0, 2 * Math.PI);
+
+        // Draw resize handles
+        drawResizeHandles(shape);
+      }
+      ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+  };
+
+  const drawResizeHandles = (shape: ShapeData) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.strokeStyle = shape.color;
-    ctx.lineWidth = shape.size;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    ctx.fillStyle = "#0080ff";
+    const handleSize = 8;
 
-    ctx.beginPath();
-    if (
-      shape.type === "rectangle" &&
-      shape.width !== undefined &&
-      shape.height !== undefined
-    ) {
-      ctx.rect(shape.x, shape.y, shape.width, shape.height);
-    } else if (shape.type === "circle" && shape.radius !== undefined) {
-      ctx.arc(shape.x, shape.y, shape.radius, 0, 2 * Math.PI);
+    if (shape.type === "rectangle" && shape.width && shape.height) {
+      // Corner handles
+      const handles = [
+        { x: shape.x, y: shape.y }, // top-left
+        { x: shape.x + shape.width, y: shape.y }, // top-right
+        { x: shape.x, y: shape.y + shape.height }, // bottom-left
+        { x: shape.x + shape.width, y: shape.y + shape.height }, // bottom-right
+      ];
+
+      handles.forEach((handle) => {
+        ctx.fillRect(
+          handle.x - handleSize / 2,
+          handle.y - handleSize / 2,
+          handleSize,
+          handleSize
+        );
+      });
+    } else if (shape.type === "circle" && shape.radius) {
+      // Right handle for radius
+      ctx.fillRect(
+        shape.x + shape.radius - handleSize / 2,
+        shape.y - handleSize / 2,
+        handleSize,
+        handleSize
+      );
     }
-    ctx.stroke();
+  };
+
+  const handleUpdateMessage = (data: UpdateMessage) => {
+    if (data.elementType === "shape") {
+      setShapes((prev) =>
+        prev.map((shape) =>
+          shape.id === data.elementId ? { ...shape, ...data.data } : shape
+        )
+      );
+    } else if (data.elementType === "stroke") {
+      setStrokes((prev) =>
+        prev.map((stroke) =>
+          stroke.id === data.elementId ? { ...stroke, ...data.data } : stroke
+        )
+      );
+    }
+    redrawCanvas();
+  };
+
+  const handleDeleteMessage = (data: DeleteMessage) => {
+    setShapes((prev) => prev.filter((shape) => shape.id !== data.elementId));
+    setStrokes((prev) => prev.filter((stroke) => stroke.id !== data.elementId));
+    redrawCanvas();
   };
 
   const getCanvasCoordinates = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -290,8 +481,53 @@ function App() {
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isConnected) return;
 
-    setIsDrawing(true);
     const pos = getCanvasCoordinates(e);
+
+    // Handle fill mode
+    if (drawMode === "fill") {
+      const clickedShape = findShapeAtPosition(pos.x, pos.y);
+      if (clickedShape) {
+        // Fill the shape
+        const updatedShape = { ...clickedShape, fillColor };
+        setShapes((prev) =>
+          prev.map((s) => (s.id === clickedShape.id ? updatedShape : s))
+        );
+
+        // Send update to server
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const message: UpdateMessage = {
+            type: "update",
+            elementId: clickedShape.id,
+            elementType: "shape",
+            data: { fillColor },
+          };
+          wsRef.current.send(JSON.stringify(message));
+        }
+      }
+      return;
+    }
+
+    // Handle select mode
+    if (drawMode === "select") {
+      const clickedShape = findShapeAtPosition(pos.x, pos.y);
+      const clickedStroke = findStrokeAtPosition(pos.x, pos.y);
+
+      if (clickedShape) {
+        setSelectedElement({ type: "shape", id: clickedShape.id });
+        setIsDragging(true);
+        setDragStart(pos);
+      } else if (clickedStroke) {
+        setSelectedElement({ type: "stroke", id: clickedStroke.id });
+        setIsDragging(true);
+        setDragStart(pos);
+      } else {
+        setSelectedElement(null);
+      }
+      return;
+    }
+
+    // Drawing modes
+    setIsDrawing(true);
 
     if (drawMode === "free") {
       const newPoint = {
@@ -309,12 +545,89 @@ function App() {
     sendCursorUpdate(pos.x, pos.y, true);
   };
 
+  const findShapeAtPosition = (x: number, y: number): ShapeData | null => {
+    // Check shapes in reverse order (topmost first)
+    for (let i = shapes.length - 1; i >= 0; i--) {
+      const shape = shapes[i];
+      if (shape.type === "rectangle" && shape.width && shape.height) {
+        if (
+          x >= shape.x &&
+          x <= shape.x + shape.width &&
+          y >= shape.y &&
+          y <= shape.y + shape.height
+        ) {
+          return shape;
+        }
+      } else if (shape.type === "circle" && shape.radius) {
+        const distance = Math.sqrt(
+          Math.pow(x - shape.x, 2) + Math.pow(y - shape.y, 2)
+        );
+        if (distance <= shape.radius) {
+          return shape;
+        }
+      }
+    }
+    return null;
+  };
+
+  const findStrokeAtPosition = (x: number, y: number): DrawStroke | null => {
+    const threshold = 10; // pixels
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const stroke = strokes[i];
+      for (const point of stroke.points) {
+        const distance = Math.sqrt(
+          Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2)
+        );
+        if (distance <= threshold) {
+          return stroke;
+        }
+      }
+    }
+    return null;
+  };
+
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasCoordinates(e);
 
     // Always send cursor updates for real-time tracking
     if (isConnected) {
       sendCursorUpdate(pos.x, pos.y, isDrawing);
+    }
+
+    // Handle dragging selected elements
+    if (isDragging && dragStart && selectedElement && drawMode === "select") {
+      const deltaX = pos.x - dragStart.x;
+      const deltaY = pos.y - dragStart.y;
+
+      if (selectedElement.type === "shape") {
+        setShapes((prev) =>
+          prev.map((shape) => {
+            if (shape.id === selectedElement.id) {
+              return { ...shape, x: shape.x + deltaX, y: shape.y + deltaY };
+            }
+            return shape;
+          })
+        );
+      } else if (selectedElement.type === "stroke") {
+        setStrokes((prev) =>
+          prev.map((stroke) => {
+            if (stroke.id === selectedElement.id) {
+              return {
+                ...stroke,
+                points: stroke.points.map((p) => ({
+                  ...p,
+                  x: p.x + deltaX,
+                  y: p.y + deltaY,
+                })),
+              };
+            }
+            return stroke;
+          })
+        );
+      }
+
+      setDragStart(pos);
+      return;
     }
 
     if (!isDrawing || !isConnected) return;
@@ -345,6 +658,7 @@ function App() {
         const width = pos.x - shapeStartPos.x;
         const height = pos.y - shapeStartPos.y;
         shape = {
+          id: Date.now().toString(),
           type: "rectangle",
           x: shapeStartPos.x,
           y: shapeStartPos.y,
@@ -352,6 +666,7 @@ function App() {
           height,
           color: brushColor,
           size: brushSize,
+          username,
         };
       } else if (drawMode === "circle") {
         const radius = Math.sqrt(
@@ -359,12 +674,14 @@ function App() {
             Math.pow(pos.y - shapeStartPos.y, 2)
         );
         shape = {
+          id: Date.now().toString(),
           type: "circle",
           x: shapeStartPos.x,
           y: shapeStartPos.y,
           radius,
           color: brushColor,
           size: brushSize,
+          username,
         };
       }
 
@@ -373,17 +690,51 @@ function App() {
   };
 
   const stopDrawing = () => {
+    // Handle drag stop
+    if (isDragging && selectedElement) {
+      setIsDragging(false);
+      setDragStart(null);
+
+      // Send update to server
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const element =
+          selectedElement.type === "shape"
+            ? shapes.find((s) => s.id === selectedElement.id)
+            : strokes.find((s) => s.id === selectedElement.id);
+
+        if (element) {
+          const message: UpdateMessage = {
+            type: "update",
+            elementId: selectedElement.id,
+            elementType: selectedElement.type,
+            data: element,
+          };
+          wsRef.current.send(JSON.stringify(message));
+        }
+      }
+      return;
+    }
+
     if (!isDrawing) return;
 
     setIsDrawing(false);
 
     if (drawMode === "free" && currentPoints.length > 0) {
+      // Create stroke with ID
+      const newStroke: DrawStroke = {
+        id: `${username}-${Date.now()}`,
+        points: currentPoints,
+        username,
+      };
+
+      // Add to local strokes
+      setStrokes((prev) => [...prev, newStroke]);
+
       // Send drawing data to server
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const message: DrawMessage = {
           type: "draw",
-          points: currentPoints,
-          username,
+          stroke: newStroke,
         };
         wsRef.current.send(JSON.stringify(message));
       }
@@ -399,14 +750,13 @@ function App() {
       (drawMode === "rectangle" || drawMode === "circle") &&
       previewShape
     ) {
-      // Finalize and send shape
-      drawShapeOnCanvas(previewShape);
+      // Add to local shapes
+      setShapes((prev) => [...prev, previewShape]);
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const message: ShapeMessage = {
           type: "shape",
           shape: previewShape,
-          username,
         };
         wsRef.current.send(JSON.stringify(message));
       }
@@ -520,7 +870,32 @@ function App() {
             >
               ⭕
             </button>
+            <button
+              className={`shape-btn ${drawMode === "select" ? "active" : ""}`}
+              onClick={() => setDrawMode("select")}
+              title="Select & Move"
+            >
+              👆
+            </button>
+            <button
+              className={`shape-btn ${drawMode === "fill" ? "active" : ""}`}
+              onClick={() => setDrawMode("fill")}
+              title="Fill shapes"
+            >
+              🪣
+            </button>
           </div>
+
+          {drawMode === "fill" && (
+            <label className="color-control">
+              🪣 Fill:
+              <input
+                type="color"
+                value={fillColor}
+                onChange={(e) => setFillColor(e.target.value)}
+              />
+            </label>
+          )}
 
           <label className="size-control">
             ✏️ Size:
