@@ -664,7 +664,11 @@ function App() {
     return null;
   };
 
-  const findResizeHandle = (x: number, y: number, shape: ShapeData): string | null => {
+  const findResizeHandle = (
+    x: number,
+    y: number,
+    shape: ShapeData
+  ): string | null => {
     const handleSize = 8;
     const threshold = handleSize;
 
@@ -724,7 +728,13 @@ function App() {
     }
 
     // Handle resizing shapes
-    if (isResizing && dragStart && selectedElement && resizeHandle && drawMode === "select") {
+    if (
+      isResizing &&
+      dragStart &&
+      selectedElement &&
+      resizeHandle &&
+      drawMode === "select"
+    ) {
       if (selectedElement.type === "shape") {
         const shape = shapes.find((s) => s.id === selectedElement.id);
         if (shape) {
@@ -736,7 +746,7 @@ function App() {
               if (s.id === selectedElement.id) {
                 if (s.type === "rectangle" && s.width && s.height) {
                   let newShape = { ...s };
-                  
+
                   // Handle different corners
                   switch (resizeHandle) {
                     case "top-left":
@@ -760,9 +770,13 @@ function App() {
                       newShape.height = s.height + deltaY;
                       break;
                   }
-                  
+
                   return newShape;
-                } else if (s.type === "circle" && s.radius && resizeHandle === "radius") {
+                } else if (
+                  s.type === "circle" &&
+                  s.radius &&
+                  resizeHandle === "radius"
+                ) {
                   // Calculate new radius based on distance from center
                   const newRadius = Math.sqrt(
                     Math.pow(pos.x - s.x, 2) + Math.pow(pos.y - s.y, 2)
