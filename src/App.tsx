@@ -598,24 +598,54 @@ function App() {
     lastPoint.current = null;
   };
 
-  const handleLoadBoard = async (boardId: string) => {
-    try {
-      const apiUrl = `http://${window.location.hostname}:8081/api/boards`;
-      const response = await fetch(`${apiUrl}/load/${boardId}`);
-      const data = await response.json();
-      
-      if (data.success && data.board) {
-        // Load shapes
-        setShapes(data.board.shapes || []);
-        // Clear existing drawings
-        clearCanvas();
-        // Redraw with loaded shapes
-        redrawCanvas();
-      }
-    } catch (error) {
-      console.error('Failed to load board:', error);
-      alert('Failed to load board');
+  // Touch event handlers for mobile/tablet support
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      setIsDrawing(true);
+      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
     }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
+    
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.strokeStyle = brushColor;
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    
+    const points = [
+      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+      { x, y, color: brushColor, size: brushSize },
+    ];
+    
+    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
+    
+    lastPoint.current = { x, y };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    setIsDrawing(false);
+    lastPoint.current = null;
   };
 
   if (view === 'login') {
@@ -635,39 +665,27 @@ function App() {
   }
 
   return (
-    <>
-      <Whiteboard
-        canvasRef={canvasRef}
-        roomName={currentRoom?.roomName || 'Whiteboard'}
-        username={username}
-        participants={currentRoom?.participants || 1}
-        brushColor={brushColor}
-        brushSize={brushSize}
-        connectionStatus={connectionStatus}
-        drawingMode={drawingMode}
-        userCursors={userCursors}
-        onBrushColorChange={setBrushColor}
-        onBrushSizeChange={setBrushSize}
-        onDrawingModeChange={setDrawingMode}
-        onClearCanvas={handleClearClick}
-        onLeaveRoom={handleLeaveRoom}
-        onMouseDown={startDrawing}
-        onMouseMove={handleMouseMove}
-        onMouseUp={stopDrawing}
-        onMouseLeave={stopDrawing}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onOpenBoardManager={() => setBoardManagerOpen(true)}
-      />
-      <BoardManager
-        isOpen={boardManagerOpen}
-        onClose={() => setBoardManagerOpen(false)}
-        currentRoomId={currentRoom?.roomId || ''}
-        username={username}
-        onLoadBoard={handleLoadBoard}
-      />
-    </>
+    <Whiteboard
+      canvasRef={canvasRef}
+      roomName={currentRoom?.roomName || 'Whiteboard'}
+      username={username}
+      participants={currentRoom?.participants || 1}
+      brushColor={brushColor}
+      brushSize={brushSize}
+      connectionStatus={connectionStatus}
+      userCursors={userCursors}
+      onBrushColorChange={setBrushColor}
+      onBrushSizeChange={setBrushSize}
+      onClearCanvas={handleClearClick}
+      onLeaveRoom={handleLeaveRoom}
+      onMouseDown={startDrawing}
+      onMouseMove={handleMouseMove}
+      onMouseUp={stopDrawing}
+      onMouseLeave={stopDrawing}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    />
   );
 }
 
