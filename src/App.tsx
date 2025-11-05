@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import { LoginView } from './components/LoginView';
 import { RoomList } from './components/RoomList';
 import { Whiteboard } from './components/Whiteboard';
+import type { DrawingMode, Shape } from './types';
+import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
 
 interface DrawPoint {
   x: number;
@@ -40,6 +42,9 @@ interface WebSocketMessage {
   message?: string;
   isPublic?: boolean;
   password?: string | null;
+  shape?: Shape;
+  shapeId?: string;
+  updates?: Partial<Shape>;
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -56,6 +61,16 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
+  
+  // Shape-related states
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
+  const [shapes, setShapes] = useState<Shape[]>([]);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [isDrawingShape, setIsDrawingShape] = useState(false);
+  const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
+  const [dragOffset, setDragOffset] = useState<{x: number, y: number} | null>(null);
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'
+  
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
     const hostname = window.location.hostname;
@@ -128,6 +143,28 @@ function App() {
       case 'draw':
         if (message.username !== username && message.points) {
           drawPoints(message.points);
+        }
+        break;
+      case 'addShape':
+        if (message.shape) {
+          setShapes(prev => [...prev, message.shape as Shape]);
+          redrawCanvas();
+        }
+        break;
+      case 'updateShape':
+        if (message.shapeId && message.updates) {
+          setShapes(prev => prev.map(shape => 
+            shape.id === message.shapeId 
+              ? { ...shape, ...message.updates }
+              : shape
+          ));
+          redrawCanvas();
+        }
+        break;
+      case 'deleteShape':
+        if (message.shapeId) {
+          setShapes(prev => prev.filter(shape => shape.id !== message.shapeId));
+          redrawCanvas();
         }
         break;
       case 'cursor':
@@ -209,9 +246,50 @@ function App() {
     }
   };
 
+  const redrawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Redraw all shapes
+    shapes.forEach(shape => {
+      drawShape(ctx, shape);
+      if (shape.id === selectedShapeId) {
+        drawSelectionHighlight(ctx, shape);
+        drawResizeHandles(ctx, shape);
+      }
+    });
+  }, [shapes, selectedShapeId]);
+
+  // Handle keyboard events for delete
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom) {
+        // Delete selected shape
+        setShapes(prev => prev.filter(shape => shape.id !== selectedShapeId));
+        sendMessage({
+          type: 'deleteShape',
+          roomId: currentRoom.roomId,
+          shapeId: selectedShapeId
+        });
+        setSelectedShapeId(null);
+        redrawCanvas();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedShapeId, currentRoom, redrawCanvas]);
+
   const handleClearClick = () => {
     if (currentRoom) {
       clearCanvas();
+      setShapes([]);
+      setSelectedShapeId(null);
       sendMessage({ type: 'clear', roomId: currentRoom.roomId });
     }
   };
@@ -236,10 +314,49 @@ function App() {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    setIsDrawing(true);
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      lastPoint.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (!rect || !currentRoom) return;
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (drawingMode === 'pen') {
+      setIsDrawing(true);
+      lastPoint.current = { x, y };
+    } else if (drawingMode === 'fill' && currentRoom) {
+      // Fill clicked shape
+      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      if (clickedShape) {
+        const updatedShape = { ...clickedShape, fillColor: brushColor };
+        setShapes(prev => prev.map(s => s.id === clickedShape.id ? updatedShape : s));
+        sendMessage({
+          type: 'updateShape',
+          roomId: currentRoom.roomId,
+          shapeId: clickedShape.id,
+          updates: updatedShape
+        });
+        redrawCanvas();
+      }
+    } else if (drawingMode === 'select') {
+      // Check if clicking on a shape
+      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      if (clickedShape) {
+        setSelectedShapeId(clickedShape.id);
+        // Check if clicking on a resize handle
+        const handle = getResizeHandle(clickedShape, x, y);
+        if (handle) {
+          setResizeHandle(handle);
+        } else {
+          setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+        }
+        setIsDrawing(true);
+      } else {
+        setSelectedShapeId(null);
+      }
+      redrawCanvas();
+    } else if (['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode)) {
+      setIsDrawingShape(true);
+      setShapeStart({ x, y });
     }
   };
 
@@ -269,18 +386,163 @@ function App() {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect && currentRoom) {
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
-      if (isDrawing) {
-        draw(e);
+    if (!rect || !currentRoom) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
+
+    if (drawingMode === 'pen' && isDrawing && lastPoint.current) {
+      // Draw freehand
+      draw(e);
+    } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
+      const shape = shapes.find(s => s.id === selectedShapeId);
+      if (!shape) return;
+
+      if (resizeHandle) {
+        // Resize shape
+        const updatedShape = { ...shape };
+
+        if (shape.type === 'rectangle' && shape.width && shape.height) {
+          if (resizeHandle.includes('t')) {
+            const newHeight = (shape.y + shape.height) - y;
+            if (newHeight > 5) {
+              updatedShape.y = y;
+              updatedShape.height = newHeight;
+            }
+          }
+          if (resizeHandle.includes('b')) {
+            updatedShape.height = Math.max(5, y - shape.y);
+          }
+          if (resizeHandle.includes('l')) {
+            const newWidth = (shape.x + shape.width) - x;
+            if (newWidth > 5) {
+              updatedShape.x = x;
+              updatedShape.width = newWidth;
+            }
+          }
+          if (resizeHandle.includes('r')) {
+            updatedShape.width = Math.max(5, x - shape.x);
+          }
+        } else if (shape.type === 'circle' && shape.radius) {
+          const dx = x - shape.x;
+          const dy = y - shape.y;
+          updatedShape.radius = Math.max(5, Math.sqrt(dx * dx + dy * dy));
+        } else if (shape.type === 'line' && shape.endX !== undefined && shape.endY !== undefined) {
+          if (resizeHandle === 'start') {
+            updatedShape.x = x;
+            updatedShape.y = y;
+          } else if (resizeHandle === 'end') {
+            updatedShape.endX = x;
+            updatedShape.endY = y;
+          }
+        } else if (shape.type === 'triangle' && shape.width && shape.height) {
+          const dx = x - (shape.x + shape.width / 2);
+          const dy = y - (shape.y + shape.height / 2);
+          updatedShape.width = Math.max(10, Math.abs(dx) * 2);
+          updatedShape.height = Math.max(10, Math.abs(dy) * 2);
+        }
+
+        setShapes(prev => prev.map(s => s.id === selectedShapeId ? updatedShape : s));
+        sendMessage({
+          type: 'updateShape',
+          roomId: currentRoom.roomId,
+          shapeId: selectedShapeId,
+          updates: updatedShape
+        });
+        redrawCanvas();
+      } else if (dragOffset) {
+        // Drag selected shape
+        const newX = x - dragOffset.x;
+        const newY = y - dragOffset.y;
+        
+        setShapes(prev => prev.map(s =>
+          s.id === selectedShapeId
+            ? { ...s, x: newX, y: newY }
+            : s
+        ));
+        
+        sendMessage({
+          type: 'updateShape',
+          roomId: currentRoom.roomId,
+          shapeId: selectedShapeId,
+          updates: { x: newX, y: newY }
+        });
+        
+        redrawCanvas();
       }
+    } else if (isDrawingShape && shapeStart) {
+      // Preview shape while dragging
+      redrawCanvas();
+      drawShapePreview(
+        ctx,
+        drawingMode as 'rectangle' | 'circle' | 'line' | 'triangle',
+        shapeStart.x,
+        shapeStart.y,
+        x,
+        y,
+        brushColor,
+        brushSize
+      );
     }
   };
 
   const stopDrawing = () => {
+    if (isDrawingShape && shapeStart && canvasRef.current && currentRoom) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const event = (window.event as MouseEvent);
+      const currentX = event.clientX - rect.left;
+      const currentY = event.clientY - rect.top;
+      
+      // Create the final shape
+      const shapeId = generateShapeId();
+      const newShape: Shape = {
+        id: shapeId,
+        type: drawingMode as 'rectangle' | 'circle' | 'line' | 'triangle',
+        x: shapeStart.x,
+        y: shapeStart.y,
+        color: brushColor,
+        size: brushSize,
+        username: username
+      };
+      
+      // Calculate dimensions based on shape type
+      if (drawingMode === 'rectangle' || drawingMode === 'triangle') {
+        newShape.width = currentX - shapeStart.x;
+        newShape.height = currentY - shapeStart.y;
+      } else if (drawingMode === 'circle') {
+        const width = currentX - shapeStart.x;
+        const height = currentY - shapeStart.y;
+        newShape.radius = Math.sqrt(width * width + height * height);
+      } else if (drawingMode === 'line') {
+        newShape.endX = currentX;
+        newShape.endY = currentY;
+      }
+      
+      // Add to local state
+      setShapes(prev => [...prev, newShape]);
+      
+      // Send to server
+      sendMessage({
+        type: 'addShape',
+        roomId: currentRoom.roomId,
+        shapeId: shapeId,
+        shape: newShape
+      });
+      
+      redrawCanvas();
+      setIsDrawingShape(false);
+      setShapeStart(null);
+    }
+    
     setIsDrawing(false);
+    setDragOffset(null);
+    setResizeHandle(null);
     lastPoint.current = null;
   };
 
@@ -359,9 +621,11 @@ function App() {
       brushColor={brushColor}
       brushSize={brushSize}
       connectionStatus={connectionStatus}
+      drawingMode={drawingMode}
       userCursors={userCursors}
       onBrushColorChange={setBrushColor}
       onBrushSizeChange={setBrushSize}
+      onDrawingModeChange={setDrawingMode}
       onClearCanvas={handleClearClick}
       onLeaveRoom={handleLeaveRoom}
       onMouseDown={startDrawing}
