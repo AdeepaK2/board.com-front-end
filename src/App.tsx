@@ -175,13 +175,13 @@ function App() {
       console.log("Connected to server");
       setIsConnected(true);
       setConnectionStatus("Connected");
-      
+
       // Clear local state when connecting (fresh start)
       setStrokes([]);
       setShapes([]);
       setSelectedElement(null);
       clearCanvas();
-      
+
       ws.send(JSON.stringify({ type: "join", username: username.trim() }));
     };
 
