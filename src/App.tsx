@@ -175,6 +175,13 @@ function App() {
       console.log("Connected to server");
       setIsConnected(true);
       setConnectionStatus("Connected");
+      
+      // Clear local state when connecting (fresh start)
+      setStrokes([]);
+      setShapes([]);
+      setSelectedElement(null);
+      clearCanvas();
+      
       ws.send(JSON.stringify({ type: "join", username: username.trim() }));
     };
 
@@ -1013,6 +1020,10 @@ function App() {
   const handleClearClick = () => {
     if (!isConnected) return;
 
+    // Clear local state
+    setStrokes([]);
+    setShapes([]);
+    setSelectedElement(null);
     clearCanvas();
 
     // Send clear command to server
