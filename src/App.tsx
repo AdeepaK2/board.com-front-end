@@ -3,6 +3,7 @@ import './App.css';
 import { LoginView } from './components/LoginView';
 import { RoomList } from './components/RoomList';
 import { Whiteboard } from './components/Whiteboard';
+import { BoardManager } from './components/BoardManager';
 import type { DrawingMode, Shape } from './types';
 import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
 
@@ -70,6 +71,7 @@ function App() {
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
   const [dragOffset, setDragOffset] = useState<{x: number, y: number} | null>(null);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'
+  const [boardManagerOpen, setBoardManagerOpen] = useState(false);
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -596,6 +598,26 @@ function App() {
     lastPoint.current = null;
   };
 
+  const handleLoadBoard = async (boardId: string) => {
+    try {
+      const apiUrl = `http://${window.location.hostname}:8081/api/boards`;
+      const response = await fetch(`${apiUrl}/load/${boardId}`);
+      const data = await response.json();
+      
+      if (data.success && data.board) {
+        // Load shapes
+        setShapes(data.board.shapes || []);
+        // Clear existing drawings
+        clearCanvas();
+        // Redraw with loaded shapes
+        redrawCanvas();
+      }
+    } catch (error) {
+      console.error('Failed to load board:', error);
+      alert('Failed to load board');
+    }
+  };
+
   if (view === 'login') {
     return <LoginView onLogin={handleLogin} />;
   }
@@ -613,29 +635,39 @@ function App() {
   }
 
   return (
-    <Whiteboard
-      canvasRef={canvasRef}
-      roomName={currentRoom?.roomName || 'Whiteboard'}
-      username={username}
-      participants={currentRoom?.participants || 1}
-      brushColor={brushColor}
-      brushSize={brushSize}
-      connectionStatus={connectionStatus}
-      drawingMode={drawingMode}
-      userCursors={userCursors}
-      onBrushColorChange={setBrushColor}
-      onBrushSizeChange={setBrushSize}
-      onDrawingModeChange={setDrawingMode}
-      onClearCanvas={handleClearClick}
-      onLeaveRoom={handleLeaveRoom}
-      onMouseDown={startDrawing}
-      onMouseMove={handleMouseMove}
-      onMouseUp={stopDrawing}
-      onMouseLeave={stopDrawing}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    />
+    <>
+      <Whiteboard
+        canvasRef={canvasRef}
+        roomName={currentRoom?.roomName || 'Whiteboard'}
+        username={username}
+        participants={currentRoom?.participants || 1}
+        brushColor={brushColor}
+        brushSize={brushSize}
+        connectionStatus={connectionStatus}
+        drawingMode={drawingMode}
+        userCursors={userCursors}
+        onBrushColorChange={setBrushColor}
+        onBrushSizeChange={setBrushSize}
+        onDrawingModeChange={setDrawingMode}
+        onClearCanvas={handleClearClick}
+        onLeaveRoom={handleLeaveRoom}
+        onMouseDown={startDrawing}
+        onMouseMove={handleMouseMove}
+        onMouseUp={stopDrawing}
+        onMouseLeave={stopDrawing}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onOpenBoardManager={() => setBoardManagerOpen(true)}
+      />
+      <BoardManager
+        isOpen={boardManagerOpen}
+        onClose={() => setBoardManagerOpen(false)}
+        currentRoomId={currentRoom?.roomId || ''}
+        username={username}
+        onLoadBoard={handleLoadBoard}
+      />
+    </>
   );
 }
 

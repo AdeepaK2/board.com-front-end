@@ -1,4 +1,4 @@
-import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket } from 'lucide-react';
+import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen } from 'lucide-react';
 import './Whiteboard.css';
 import type { DrawingMode } from '../types';
 
@@ -24,6 +24,7 @@ interface WhiteboardProps {
   onTouchStart: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
+  onOpenBoardManager: () => void;
 }
 
 export const Whiteboard = ({
@@ -48,6 +49,7 @@ export const Whiteboard = ({
   onTouchStart,
   onTouchMove,
   onTouchEnd,
+  onOpenBoardManager,
 }: WhiteboardProps) => {
   return (
     <div className="whiteboard-view">
@@ -142,6 +144,11 @@ export const Whiteboard = ({
           <button onClick={onClearCanvas} className="btn-clear">
             <Eraser size={18} />
             Clear
+          </button>
+
+          <button onClick={onOpenBoardManager} className="btn-boards">
+            <FolderOpen size={18} />
+            Boards
           </button>
 
           <button onClick={onLeaveRoom} className="btn-leave">

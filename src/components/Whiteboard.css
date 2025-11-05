@@ -163,6 +163,25 @@
   background: #cb2431;
 }
 
+.btn-boards {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: #0366d6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.8125rem;
+}
+
+.btn-boards:hover {
+  background: #0256c7;
+}
+
 .btn-leave {
   display: flex;
   align-items: center;
