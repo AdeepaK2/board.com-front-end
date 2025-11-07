@@ -13,12 +13,14 @@ interface Room {
 interface RoomListProps {
   rooms: Room[];
   username: string;
-  onCreateRoom: (roomName: string, isPublic: boolean, password?: string) => void;
+  onCreateRoom: (roomName: string, isPublic: boolean, password?: string, invitedUsers?: string[]) => void;
   onJoinRoom: (roomId: string, password?: string) => void;
   onLogout: () => void;
+  activeUsers: string[];
+  onRequestActiveUsers: () => void;
 }
 
-export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout }: RoomListProps) => {
+export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout, activeUsers, onRequestActiveUsers }: RoomListProps) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState('');
@@ -26,15 +28,35 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout }
   const [isPublic, setIsPublic] = useState(true);
   const [roomPassword, setRoomPassword] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+
+  const handleOpenCreateModal = () => {
+    onRequestActiveUsers(); // Request fresh list of active users
+    setShowCreateModal(true);
+  };
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
     if (newRoomName.trim()) {
-      onCreateRoom(newRoomName.trim(), isPublic, roomPassword || undefined);
+      onCreateRoom(
+        newRoomName.trim(), 
+        isPublic, 
+        roomPassword || undefined,
+        !isPublic ? selectedUsers : undefined
+      );
       setNewRoomName('');
       setRoomPassword('');
+      setSelectedUsers([]);
       setShowCreateModal(false);
     }
+  };
+
+  const toggleUserSelection = (user: string) => {
+    setSelectedUsers(prev =>
+      prev.includes(user)
+        ? prev.filter(u => u !== user)
+        : [...prev, user]
+    );
   };
 
   const handleJoinClick = (room: Room) => {
@@ -64,7 +86,7 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout }
             <p>Welcome, <strong>{username}</strong></p>
           </div>
           <div className="header-actions">
-            <button onClick={() => setShowCreateModal(true)} className="btn-create">
+            <button onClick={handleOpenCreateModal} className="btn-create">
               <Plus size={20} />
               Create Room
             </button>
@@ -156,16 +178,40 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout }
               </div>
 
               {!isPublic && (
-                <div className="form-group">
-                  <label htmlFor="password">Password (optional)</label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={roomPassword}
-                    onChange={(e) => setRoomPassword(e.target.value)}
-                    placeholder="Enter password"
-                  />
-                </div>
+                <>
+                  <div className="form-group">
+                    <label htmlFor="password">Password (optional)</label>
+                    <input
+                      id="password"
+                      type="password"
+                      value={roomPassword}
+                      onChange={(e) => setRoomPassword(e.target.value)}
+                      placeholder="Enter password"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Invite Users (optional)</label>
+                    <div className="user-selection">
+                      {activeUsers
+                        .filter(user => user !== username)
+                        .map(user => (
+                          <label key={user} className="user-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={selectedUsers.includes(user)}
+                              onChange={() => toggleUserSelection(user)}
+                            />
+                            <span>{user}</span>
+                          </label>
+                        ))
+                      }
+                      {activeUsers.filter(user => user !== username).length === 0 && (
+                        <p className="no-users">No other users online</p>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
 
               <div className="modal-actions">

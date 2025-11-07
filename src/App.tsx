@@ -48,6 +48,8 @@ interface WebSocketMessage {
   shapeId?: string;
   updates?: Partial<Shape>;
   creator?: string;
+  users?: string[];
+  invitedUsers?: string[];
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -66,6 +68,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [activeUsers, setActiveUsers] = useState<string[]>([]);
   
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
@@ -232,6 +235,20 @@ function App() {
           });
         }
         break;
+      case 'activeUsers':
+        if (message.users) {
+          setActiveUsers(message.users);
+        }
+        break;
+      case 'newPrivateRoomInvite':
+        // Show notification when invited to a private room
+        if (message.roomName && message.creator) {
+          setNotification({
+            message: `🔒 ${message.creator} invited you to private room: "${message.roomName}"`,
+            type: 'info'
+          });
+        }
+        break;
     }
   };
 
@@ -247,6 +264,10 @@ function App() {
     setView('roomList');
   };
 
+  const requestActiveUsers = () => {
+    sendMessage({ type: 'getActiveUsers' });
+  };
+
   const handleLogout = () => {
     if (currentRoom) {
       sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
@@ -256,8 +277,14 @@ function App() {
     setUsername('');
   };
 
-  const handleCreateRoom = (roomName: string, isPublic: boolean, password?: string) => {
-    sendMessage({ type: 'createRoom', roomName, isPublic, password: password || null });
+  const handleCreateRoom = (roomName: string, isPublic: boolean, password?: string, invitedUsers?: string[]) => {
+    sendMessage({ 
+      type: 'createRoom', 
+      roomName, 
+      isPublic, 
+      password: password || null,
+      invitedUsers: invitedUsers || []
+    });
   };
 
   const handleJoinRoom = (roomId: string, password?: string) => {
@@ -870,6 +897,8 @@ function App() {
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onLogout={handleLogout}
+          activeUsers={activeUsers}
+          onRequestActiveUsers={requestActiveUsers}
         />
         {notification && (
           <Notification
