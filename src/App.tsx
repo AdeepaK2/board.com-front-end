@@ -66,12 +66,16 @@ function App() {
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
   const [dragOffset, setDragOffset] = useState<{x: number, y: number} | null>(null);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'
   const [boardManagerOpen, setBoardManagerOpen] = useState(false);
+  const [editingText, setEditingText] = useState<string>('');
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -145,6 +149,18 @@ function App() {
       case 'draw':
         if (message.username !== username && message.points) {
           drawPoints(message.points);
+          // Store incoming stroke points (they come in small segments)
+          // We'll append them to the last stroke or create new one
+          setStrokes(prev => {
+            if (prev.length === 0 || !message.points) {
+              return message.points ? [{ points: message.points }] : prev;
+            }
+            // Append to last stroke
+            const last = prev[prev.length - 1];
+            const updated = [...prev];
+            updated[updated.length - 1] = { points: [...last.points, ...message.points] };
+            return updated;
+          });
         }
         break;
       case 'addShape':
@@ -246,6 +262,8 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
+    // Clear strokes as well
+    setStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -257,6 +275,23 @@ function App() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
+    // Redraw all strokes (pencil drawings)
+    strokes.forEach(stroke => {
+      if (stroke.points.length < 2) return;
+      for (let i = 0; i < stroke.points.length - 1; i++) {
+        const start = stroke.points[i];
+        const end = stroke.points[i + 1];
+        ctx.strokeStyle = start.color;
+        ctx.lineWidth = start.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    });
+    
     // Redraw all shapes
     shapes.forEach(shape => {
       drawShape(ctx, shape);
@@ -265,11 +300,71 @@ function App() {
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, selectedShapeId]);
+  }, [shapes, strokes, selectedShapeId]);
 
-  // Handle keyboard events for delete
+  // Auto-redraw when shapes or strokes change
+  useEffect(() => {
+    redrawCanvas();
+  }, [shapes, strokes, redrawCanvas]);
+
+  const updateTextShape = useCallback((newText: string) => {
+    if (!editingTextId) return;
+    setShapes(prev => prev.map(shape => 
+      shape.id === editingTextId ? { ...shape, text: newText } : shape
+    ));
+    redrawCanvas();
+  }, [editingTextId, redrawCanvas]);
+
+  // Handle keyboard events for delete and text editing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle text editing
+      if (editingTextId) {
+        e.preventDefault(); // Prevent default browser behavior while editing
+        
+        if (e.key === 'Escape') {
+          // Cancel text editing - remove empty text or keep existing
+          const shape = shapes.find(s => s.id === editingTextId);
+          if (shape && !shape.text) {
+            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+          }
+          setEditingTextId(null);
+          setEditingText('');
+          redrawCanvas();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          // Finish text editing
+          if (editingText.trim() && currentRoom) {
+            const shape = shapes.find(s => s.id === editingTextId);
+            if (shape) {
+              const updatedShape = { ...shape, text: editingText.trim() };
+              setShapes(prev => prev.map(s => s.id === editingTextId ? updatedShape : s));
+              sendMessage({
+                type: 'addShape',
+                roomId: currentRoom.roomId,
+                shapeId: editingTextId,
+                shape: updatedShape
+              });
+            }
+          } else if (!editingText.trim()) {
+            // Remove empty text
+            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+          }
+          setEditingTextId(null);
+          setEditingText('');
+          redrawCanvas();
+        } else if (e.key === 'Backspace') {
+          const newText = editingText.slice(0, -1);
+          setEditingText(newText);
+          updateTextShape(newText);
+        } else if (e.key.length === 1 || e.key === ' ') {
+          const newText = editingText + e.key;
+          setEditingText(newText);
+          updateTextShape(newText);
+        }
+        return;
+      }
+      
+      // Handle delete for selected shapes
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom) {
         // Delete selected shape
         setShapes(prev => prev.filter(shape => shape.id !== selectedShapeId));
@@ -285,7 +380,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedShapeId, currentRoom, redrawCanvas]);
+  }, [selectedShapeId, currentRoom, redrawCanvas, editingTextId, editingText, shapes, updateTextShape]);
 
   const handleClearClick = () => {
     if (currentRoom) {
@@ -325,6 +420,8 @@ function App() {
     if (drawingMode === 'pen') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
+      // Start a new stroke
+      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
     } else if (drawingMode === 'fill' && currentRoom) {
       // Fill clicked shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
@@ -359,6 +456,35 @@ function App() {
     } else if (['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode)) {
       setIsDrawingShape(true);
       setShapeStart({ x, y });
+    } else if (drawingMode === 'text' && currentRoom) {
+      console.log('Text mode activated at:', x, y);
+      // Create text shape immediately and start editing
+      const shapeId = generateShapeId();
+      const newShape: Shape = {
+        id: shapeId,
+        type: 'text',
+        x,
+        y,
+        color: brushColor,
+        size: brushSize,
+        username: username,
+        text: '',
+        fontSize: 16
+      };
+      
+      console.log('Creating text shape:', newShape);
+      setShapes(prev => {
+        const updated = [...prev, newShape];
+        console.log('Updated shapes:', updated);
+        return updated;
+      });
+      setEditingTextId(shapeId);
+      setEditingText('');
+      
+      // Force redraw after a short delay to ensure state is updated
+      setTimeout(() => {
+        redrawCanvas();
+      }, 0);
     }
   };
 
@@ -382,6 +508,10 @@ function App() {
       { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
       { x, y, color: brushColor, size: brushSize },
     ];
+    
+    // Add points to current stroke
+    setCurrentStroke(prev => [...prev, ...points]);
+    
     sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     lastPoint.current = { x, y };
   };
@@ -495,6 +625,12 @@ function App() {
   };
 
   const stopDrawing = () => {
+    // Save current stroke if drawing with pen
+    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
+      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setCurrentStroke([]);
+    }
+    
     if (isDrawingShape && shapeStart && canvasRef.current && currentRoom) {
       const rect = canvasRef.current.getBoundingClientRect();
       const event = (window.event as MouseEvent);
@@ -598,54 +734,25 @@ function App() {
     lastPoint.current = null;
   };
 
-  // Touch event handlers for mobile/tablet support
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      setIsDrawing(true);
-      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+  const handleLoadBoard = async (boardId: string) => {
+    try {
+      const apiUrl = `http://${window.location.hostname}:8081/api/boards`;
+      const response = await fetch(`${apiUrl}/load/${boardId}`);
+      const data = await response.json();
+      
+      if (data.success && data.board) {
+        // Load shapes and strokes
+        setShapes(data.board.shapes || []);
+        setStrokes(data.board.strokes || []);
+        // Clear existing drawings
+        clearCanvas();
+        // Redraw with loaded shapes and strokes
+        redrawCanvas();
+      }
+    } catch (error) {
+      console.error('Failed to load board:', error);
+      alert('Failed to load board');
     }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
-    
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
-    
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
-    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
-    
-    lastPoint.current = { x, y };
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    setIsDrawing(false);
-    lastPoint.current = null;
   };
 
   if (view === 'login') {
@@ -665,27 +772,41 @@ function App() {
   }
 
   return (
-    <Whiteboard
-      canvasRef={canvasRef}
-      roomName={currentRoom?.roomName || 'Whiteboard'}
-      username={username}
-      participants={currentRoom?.participants || 1}
-      brushColor={brushColor}
-      brushSize={brushSize}
-      connectionStatus={connectionStatus}
-      userCursors={userCursors}
-      onBrushColorChange={setBrushColor}
-      onBrushSizeChange={setBrushSize}
-      onClearCanvas={handleClearClick}
-      onLeaveRoom={handleLeaveRoom}
-      onMouseDown={startDrawing}
-      onMouseMove={handleMouseMove}
-      onMouseUp={stopDrawing}
-      onMouseLeave={stopDrawing}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    />
+    <>
+      <Whiteboard
+        canvasRef={canvasRef}
+        roomName={currentRoom?.roomName || 'Whiteboard'}
+        username={username}
+        participants={currentRoom?.participants || 1}
+        brushColor={brushColor}
+        brushSize={brushSize}
+        connectionStatus={connectionStatus}
+        drawingMode={drawingMode}
+        userCursors={userCursors}
+        onBrushColorChange={setBrushColor}
+        onBrushSizeChange={setBrushSize}
+        onDrawingModeChange={setDrawingMode}
+        onClearCanvas={handleClearClick}
+        onLeaveRoom={handleLeaveRoom}
+        onMouseDown={startDrawing}
+        onMouseMove={handleMouseMove}
+        onMouseUp={stopDrawing}
+        onMouseLeave={stopDrawing}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onOpenBoardManager={() => setBoardManagerOpen(true)}
+      />
+      <BoardManager
+        isOpen={boardManagerOpen}
+        onClose={() => setBoardManagerOpen(false)}
+        currentRoomId={currentRoom?.roomId || ''}
+        username={username}
+        onLoadBoard={handleLoadBoard}
+        shapes={shapes}
+        strokes={strokes}
+      />
+    </>
   );
 }
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, FolderOpen, Download, Upload, X, Trash2, Calendar, User } from 'lucide-react';
+import type { Shape, DrawPoint } from '../types';
 import './BoardManager.css';
 
 interface BoardMetadata {
@@ -16,11 +17,13 @@ interface BoardManagerProps {
   currentRoomId: string;
   username: string;
   onLoadBoard: (boardId: string) => void;
+  shapes: Shape[];
+  strokes: { points: DrawPoint[] }[];
 }
 
 const API_URL = 'http://' + window.location.hostname + ':8081/api/boards';
 
-export const BoardManager = ({ isOpen, onClose, currentRoomId, username, onLoadBoard }: BoardManagerProps) => {
+export const BoardManager = ({ isOpen, onClose, currentRoomId, username, onLoadBoard, shapes, strokes }: BoardManagerProps) => {
   const [view, setView] = useState<'main' | 'save' | 'load' | 'import'>('main');
   const [boards, setBoards] = useState<BoardMetadata[]>([]);
   const [boardName, setBoardName] = useState('');
@@ -63,7 +66,9 @@ export const BoardManager = ({ isOpen, onClose, currentRoomId, username, onLoadB
         body: JSON.stringify({
           boardName: boardName.trim(),
           roomId: currentRoomId,
-          username: username
+          username: username,
+          shapes: shapes,
+          strokes: strokes
         })
       });
       

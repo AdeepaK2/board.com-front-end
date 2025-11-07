@@ -61,6 +61,25 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
         ctx.stroke();
       }
       break;
+
+    case 'text': {
+      const fontSize = shape.fontSize || 16;
+      ctx.font = `${fontSize}px Arial`;
+      ctx.fillStyle = shape.color;
+      ctx.textBaseline = 'top';
+      
+      if (shape.text) {
+        // Draw text only
+        ctx.fillText(shape.text, shape.x, shape.y);
+      } else {
+        // Show cursor for empty text being edited
+        ctx.fillStyle = shape.color;
+        const cursorHeight = fontSize;
+        const cursorWidth = 2;
+        ctx.fillRect(shape.x, shape.y, cursorWidth, cursorHeight);
+      }
+      break;
+    }
   }
 
   ctx.restore();
@@ -164,6 +183,28 @@ export function isPointInShape(x: number, y: number, shape: Shape): boolean {
         const x3 = shape.x + shape.width;
         const y3 = shape.y + shape.height;
         return isPointInTriangle(x, y, x1, y1, x2, y2, x3, y3);
+      }
+      break;
+
+    case 'text':
+      if (shape.text) {
+        // Create a temporary canvas to measure text
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const fontSize = shape.fontSize || 16;
+          ctx.font = `${fontSize}px Arial`;
+          const textWidth = ctx.measureText(shape.text).width;
+          const textHeight = fontSize;
+          
+          // Check if point is within text bounds (with some padding)
+          return (
+            x >= shape.x - 5 &&
+            x <= shape.x + textWidth + 100 && // Extra space for username
+            y >= shape.y - 5 &&
+            y <= shape.y + textHeight + 5
+          );
+        }
       }
       break;
   }

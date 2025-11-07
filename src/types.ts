@@ -9,7 +9,7 @@ export interface DrawPoint {
 
 export interface Shape {
   id: string;
-  type: 'rectangle' | 'circle' | 'line' | 'triangle';
+  type: 'rectangle' | 'circle' | 'line' | 'triangle' | 'text';
   x: number;
   y: number;
   width?: number;
@@ -21,6 +21,8 @@ export interface Shape {
   size: number;
   fillColor?: string;
   username: string;
+  text?: string;
+  fontSize?: number;
 }
 
 export interface BoardData {
@@ -32,7 +34,7 @@ export interface BoardData {
   strokes: { points: DrawPoint[] }[];
 }
 
-export type DrawingMode = 'pen' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill';
+export type DrawingMode = 'pen' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text';
 
 export interface Room {
   roomId: string;
