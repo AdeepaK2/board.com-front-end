@@ -248,6 +248,9 @@
   animation: slideInRight 0.3s ease;
   z-index: 2000;
   max-width: 400px;
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 @keyframes slideInRight {
@@ -264,14 +267,17 @@
 .notification.success {
   background-color: #4CAF50;
   color: white;
+  border-left: 4px solid #2e7d32;
 }
 
 .notification.error {
   background-color: #f44336;
   color: white;
+  border-left: 4px solid #c62828;
 }
 
 .notification.info {
   background-color: #2196F3;
   color: white;
+  border-left: 4px solid #1565c0;
 }

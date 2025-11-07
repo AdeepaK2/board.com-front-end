@@ -1,4 +1,5 @@
-import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen } from 'lucide-react';
+import { useState } from 'react';
+import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
 import './Whiteboard.css';
 import type { DrawingMode } from '../types';
 
@@ -9,11 +10,13 @@ interface WhiteboardProps {
   participants: number;
   brushColor: string;
   brushSize: number;
+  eraserSize: number;
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
+  onEraserSizeChange: (size: number) => void;
   onDrawingModeChange: (mode: DrawingMode) => void;
   onClearCanvas: () => void;
   onLeaveRoom: () => void;
@@ -34,11 +37,13 @@ export const Whiteboard = ({
   participants,
   brushColor,
   brushSize,
+  eraserSize,
   connectionStatus,
   drawingMode,
   userCursors,
   onBrushColorChange,
   onBrushSizeChange,
+  onEraserSizeChange,
   onDrawingModeChange,
   onClearCanvas,
   onLeaveRoom,
@@ -51,6 +56,18 @@ export const Whiteboard = ({
   onTouchEnd,
   onOpenBoardManager,
 }: WhiteboardProps) => {
+  const [showShapesDropdown, setShowShapesDropdown] = useState(false);
+
+  const shapeTools = [
+    { mode: 'rectangle' as DrawingMode, icon: Square, label: 'Rectangle' },
+    { mode: 'circle' as DrawingMode, icon: Circle, label: 'Circle' },
+    { mode: 'line' as DrawingMode, icon: Minus, label: 'Line' },
+    { mode: 'triangle' as DrawingMode, icon: Triangle, label: 'Triangle' },
+  ];
+
+  const isShapeMode = ['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode);
+  const currentShapeTool = shapeTools.find(tool => tool.mode === drawingMode) || shapeTools[0];
+
   return (
     <div className="whiteboard-view">
       {/* Toolbar */}
@@ -74,46 +91,63 @@ export const Whiteboard = ({
             <Palette size={18} />
           </button>
           <button 
+            className={`tool-btn ${drawingMode === 'eraser' ? 'active' : ''}`}
+            onClick={() => onDrawingModeChange('eraser')}
+            title="Eraser Tool"
+          >
+            <Eraser size={18} />
+          </button>
+          <button 
             className={`tool-btn ${drawingMode === 'select' ? 'active' : ''}`}
             onClick={() => onDrawingModeChange('select')}
             title="Select Tool"
           >
             <MousePointer2 size={18} />
           </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'rectangle' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('rectangle')}
-            title="Rectangle"
-          >
-            <Square size={18} />
-          </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'circle' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('circle')}
-            title="Circle"
-          >
-            <Circle size={18} />
-          </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'line' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('line')}
-            title="Line"
-          >
-            <Minus size={18} />
-          </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'triangle' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('triangle')}
-            title="Triangle"
-          >
-            <Triangle size={18} />
-          </button>
+          
+          {/* Shapes Dropdown */}
+          <div className="shapes-dropdown">
+            <button 
+              className={`tool-btn ${isShapeMode ? 'active' : ''}`}
+              onClick={() => setShowShapesDropdown(!showShapesDropdown)}
+              title="Shapes"
+            >
+              {isShapeMode ? <currentShapeTool.icon size={18} /> : <Shapes size={18} />}
+              <ChevronDown size={14} className="dropdown-icon" />
+            </button>
+            {showShapesDropdown && (
+              <div className="dropdown-menu">
+                {shapeTools.map(({ mode, icon: Icon, label }) => (
+                  <button
+                    key={mode}
+                    className={`dropdown-item ${drawingMode === mode ? 'active' : ''}`}
+                    onClick={() => {
+                      onDrawingModeChange(mode);
+                      setShowShapesDropdown(false);
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button 
             className={`tool-btn ${drawingMode === 'fill' ? 'active' : ''}`}
             onClick={() => onDrawingModeChange('fill')}
             title="Fill Tool"
           >
             <PaintBucket size={18} />
+          </button>
+          
+          <button 
+            className={`tool-btn ${drawingMode === 'text' ? 'active' : ''}`}
+            onClick={() => onDrawingModeChange('text')}
+            title="Text Tool"
+          >
+            <Type size={18} />
           </button>
         </div>
 
@@ -125,21 +159,58 @@ export const Whiteboard = ({
               value={brushColor}
               onChange={(e) => onBrushColorChange(e.target.value)}
               className="color-picker"
+              disabled={drawingMode === 'eraser'}
             />
           </label>
 
-          <label className="control-item">
-            <span>Size:</span>
-            <input
-              type="range"
-              min="1"
-              max="20"
-              value={brushSize}
-              onChange={(e) => onBrushSizeChange(Number(e.target.value))}
-              className="size-slider"
-            />
-            <span className="size-value">{brushSize}px</span>
-          </label>
+          {drawingMode === 'eraser' ? (
+            <label className="control-item">
+              <span>Eraser Size:</span>
+              <div className="eraser-size-buttons">
+                <button 
+                  className={`size-btn ${eraserSize === 1 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(1)}
+                  title="Small (10px)"
+                >
+                  S
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 2 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(2)}
+                  title="Medium (20px)"
+                >
+                  M
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 3 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(3)}
+                  title="Large (40px)"
+                >
+                  L
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 4 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(4)}
+                  title="Extra Large (80px)"
+                >
+                  XL
+                </button>
+              </div>
+            </label>
+          ) : (
+            <label className="control-item">
+              <span>Size:</span>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                value={brushSize}
+                onChange={(e) => onBrushSizeChange(Number(e.target.value))}
+                className="size-slider"
+              />
+              <span className="size-value">{brushSize}px</span>
+            </label>
+          )}
 
           <button onClick={onClearCanvas} className="btn-clear">
             <Eraser size={18} />

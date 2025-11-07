@@ -317,6 +317,46 @@
   border-color: #959da5;
 }
 
+.user-selection {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #d1d5da;
+  border-radius: 3px;
+  padding: 0.5rem;
+}
+
+.user-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.user-checkbox:hover {
+  background: #f6f8fa;
+}
+
+.user-checkbox input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.user-checkbox span {
+  flex: 1;
+  color: #24292e;
+  font-weight: 500;
+}
+
+.no-users {
+  padding: 1rem;
+  text-align: center;
+  color: #6a737d;
+  font-size: 0.875rem;
+}
+
 @keyframes slideUp {
   from {
     opacity: 0;

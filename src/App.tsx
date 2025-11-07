@@ -4,6 +4,7 @@ import { LoginView } from './components/LoginView';
 import { RoomList } from './components/RoomList';
 import { Whiteboard } from './components/Whiteboard';
 import { BoardManager } from './components/BoardManager';
+import Notification from './components/Notification';
 import type { DrawingMode, Shape } from './types';
 import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
 
@@ -46,6 +47,9 @@ interface WebSocketMessage {
   shape?: Shape;
   shapeId?: string;
   updates?: Partial<Shape>;
+  creator?: string;
+  users?: string[];
+  invitedUsers?: string[];
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -59,19 +63,26 @@ function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [brushColor, setBrushColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(3);
+  const [eraserSize, setEraserSize] = useState(2); // 1=small, 2=medium, 3=large, 4=extra-large
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [activeUsers, setActiveUsers] = useState<string[]>([]);
   
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
   const [dragOffset, setDragOffset] = useState<{x: number, y: number} | null>(null);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'
   const [boardManagerOpen, setBoardManagerOpen] = useState(false);
+  const [editingText, setEditingText] = useState<string>('');
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -83,6 +94,12 @@ function App() {
   })();
   
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
+
+  // Calculate eraser size based on selection (1-4)
+  const getEraserSize = () => {
+    const sizes = [10, 20, 40, 80]; // small, medium, large, extra-large
+    return sizes[eraserSize - 1] || 20;
+  };
 
   useEffect(() => {
     // Display connection info in console
@@ -145,6 +162,18 @@ function App() {
       case 'draw':
         if (message.username !== username && message.points) {
           drawPoints(message.points);
+          // Store incoming stroke points (they come in small segments)
+          // We'll append them to the last stroke or create new one
+          setStrokes(prev => {
+            if (prev.length === 0 || !message.points) {
+              return message.points ? [{ points: message.points }] : prev;
+            }
+            // Append to last stroke
+            const last = prev[prev.length - 1];
+            const updated = [...prev];
+            updated[updated.length - 1] = { points: [...last.points, ...message.points] };
+            return updated;
+          });
         }
         break;
       case 'addShape':
@@ -197,6 +226,29 @@ function App() {
           setCurrentRoom({ ...currentRoom, participants: message.participants || currentRoom.participants });
         }
         break;
+      case 'newPublicRoom':
+        // Show notification when a new public room is created (but not to the creator)
+        if (message.roomName && message.creator && message.creator !== username) {
+          setNotification({
+            message: `🎨 ${message.creator} created a new room: "${message.roomName}"`,
+            type: 'info'
+          });
+        }
+        break;
+      case 'activeUsers':
+        if (message.users) {
+          setActiveUsers(message.users);
+        }
+        break;
+      case 'newPrivateRoomInvite':
+        // Show notification when invited to a private room
+        if (message.roomName && message.creator) {
+          setNotification({
+            message: `🔒 ${message.creator} invited you to private room: "${message.roomName}"`,
+            type: 'info'
+          });
+        }
+        break;
     }
   };
 
@@ -212,6 +264,10 @@ function App() {
     setView('roomList');
   };
 
+  const requestActiveUsers = () => {
+    sendMessage({ type: 'getActiveUsers' });
+  };
+
   const handleLogout = () => {
     if (currentRoom) {
       sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
@@ -221,8 +277,14 @@ function App() {
     setUsername('');
   };
 
-  const handleCreateRoom = (roomName: string, isPublic: boolean, password?: string) => {
-    sendMessage({ type: 'createRoom', roomName, isPublic, password: password || null });
+  const handleCreateRoom = (roomName: string, isPublic: boolean, password?: string, invitedUsers?: string[]) => {
+    sendMessage({ 
+      type: 'createRoom', 
+      roomName, 
+      isPublic, 
+      password: password || null,
+      invitedUsers: invitedUsers || []
+    });
   };
 
   const handleJoinRoom = (roomId: string, password?: string) => {
@@ -246,6 +308,8 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
+    // Clear strokes as well
+    setStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -257,6 +321,34 @@ function App() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
+    // Redraw all strokes (pencil drawings)
+    strokes.forEach(stroke => {
+      if (stroke.points.length < 2) return;
+      for (let i = 0; i < stroke.points.length - 1; i++) {
+        const start = stroke.points[i];
+        const end = stroke.points[i + 1];
+        
+        if (start.color === 'eraser') {
+          // Apply eraser stroke
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = start.color;
+        }
+        
+        ctx.lineWidth = start.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    });
+    
+    ctx.globalCompositeOperation = 'source-over'; // Reset
+    
     // Redraw all shapes
     shapes.forEach(shape => {
       drawShape(ctx, shape);
@@ -265,11 +357,71 @@ function App() {
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, selectedShapeId]);
+  }, [shapes, strokes, selectedShapeId]);
 
-  // Handle keyboard events for delete
+  // Auto-redraw when shapes or strokes change
+  useEffect(() => {
+    redrawCanvas();
+  }, [shapes, strokes, redrawCanvas]);
+
+  const updateTextShape = useCallback((newText: string) => {
+    if (!editingTextId) return;
+    setShapes(prev => prev.map(shape => 
+      shape.id === editingTextId ? { ...shape, text: newText } : shape
+    ));
+    redrawCanvas();
+  }, [editingTextId, redrawCanvas]);
+
+  // Handle keyboard events for delete and text editing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle text editing
+      if (editingTextId) {
+        e.preventDefault(); // Prevent default browser behavior while editing
+        
+        if (e.key === 'Escape') {
+          // Cancel text editing - remove empty text or keep existing
+          const shape = shapes.find(s => s.id === editingTextId);
+          if (shape && !shape.text) {
+            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+          }
+          setEditingTextId(null);
+          setEditingText('');
+          redrawCanvas();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          // Finish text editing
+          if (editingText.trim() && currentRoom) {
+            const shape = shapes.find(s => s.id === editingTextId);
+            if (shape) {
+              const updatedShape = { ...shape, text: editingText.trim() };
+              setShapes(prev => prev.map(s => s.id === editingTextId ? updatedShape : s));
+              sendMessage({
+                type: 'addShape',
+                roomId: currentRoom.roomId,
+                shapeId: editingTextId,
+                shape: updatedShape
+              });
+            }
+          } else if (!editingText.trim()) {
+            // Remove empty text
+            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+          }
+          setEditingTextId(null);
+          setEditingText('');
+          redrawCanvas();
+        } else if (e.key === 'Backspace') {
+          const newText = editingText.slice(0, -1);
+          setEditingText(newText);
+          updateTextShape(newText);
+        } else if (e.key.length === 1 || e.key === ' ') {
+          const newText = editingText + e.key;
+          setEditingText(newText);
+          updateTextShape(newText);
+        }
+        return;
+      }
+      
+      // Handle delete for selected shapes
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom) {
         // Delete selected shape
         setShapes(prev => prev.filter(shape => shape.id !== selectedShapeId));
@@ -285,7 +437,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedShapeId, currentRoom, redrawCanvas]);
+  }, [selectedShapeId, currentRoom, redrawCanvas, editingTextId, editingText, shapes, updateTextShape]);
 
   const handleClearClick = () => {
     if (currentRoom) {
@@ -304,7 +456,16 @@ function App() {
     for (let i = 0; i < points.length - 1; i++) {
       const start = points[i];
       const end = points[i + 1];
-      ctx.strokeStyle = start.color;
+      
+      if (start.color === 'eraser') {
+        // Draw eraser stroke
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = start.color;
+      }
+      
       ctx.lineWidth = start.size;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -313,6 +474,7 @@ function App() {
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
     }
+    ctx.globalCompositeOperation = 'source-over'; // Reset
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -325,6 +487,12 @@ function App() {
     if (drawingMode === 'pen') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
+      // Start a new stroke
+      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+    } else if (drawingMode === 'eraser') {
+      setIsDrawing(true);
+      lastPoint.current = { x, y };
+      // Start eraser stroke - don't add to currentStroke since we don't save eraser strokes
     } else if (drawingMode === 'fill' && currentRoom) {
       // Fill clicked shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
@@ -359,6 +527,35 @@ function App() {
     } else if (['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode)) {
       setIsDrawingShape(true);
       setShapeStart({ x, y });
+    } else if (drawingMode === 'text' && currentRoom) {
+      console.log('Text mode activated at:', x, y);
+      // Create text shape immediately and start editing
+      const shapeId = generateShapeId();
+      const newShape: Shape = {
+        id: shapeId,
+        type: 'text',
+        x,
+        y,
+        color: brushColor,
+        size: brushSize,
+        username: username,
+        text: '',
+        fontSize: 16
+      };
+      
+      console.log('Creating text shape:', newShape);
+      setShapes(prev => {
+        const updated = [...prev, newShape];
+        console.log('Updated shapes:', updated);
+        return updated;
+      });
+      setEditingTextId(shapeId);
+      setEditingText('');
+      
+      // Force redraw after a short delay to ensure state is updated
+      setTimeout(() => {
+        redrawCanvas();
+      }, 0);
     }
   };
 
@@ -370,19 +567,50 @@ function App() {
     const y = e.clientY - rect.top;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    
+    if (drawingMode === 'eraser') {
+      // Eraser mode: use destination-out to actually erase
+      const eraserWidth = getEraserSize();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = eraserWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
+      
+      // Don't store eraser strokes - just erase visually
+      // Send erase message to other users
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
+        { x, y, color: 'eraser', size: eraserWidth },
+      ];
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else {
+      // Normal pen mode
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        { x, y, color: brushColor, size: brushSize },
+      ];
+      
+      // Add points to current stroke
+      setCurrentStroke(prev => [...prev, ...points]);
+      
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    }
+    
     lastPoint.current = { x, y };
   };
 
@@ -495,6 +723,12 @@ function App() {
   };
 
   const stopDrawing = () => {
+    // Save current stroke if drawing with pen
+    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
+      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setCurrentStroke([]);
+    }
+    
     if (isDrawingShape && shapeStart && canvasRef.current && currentRoom) {
       const rect = canvasRef.current.getBoundingClientRect();
       const event = (window.event as MouseEvent);
@@ -554,8 +788,14 @@ function App() {
     const touch = e.touches[0];
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
       setIsDrawing(true);
-      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+      lastPoint.current = { x, y };
+      // Start pen stroke only (eraser doesn't need currentStroke)
+      if (drawingMode === 'pen') {
+        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+      }
     }
   };
 
@@ -572,71 +812,46 @@ function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
-    
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
-    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
-    
-    lastPoint.current = { x, y };
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    setIsDrawing(false);
-    lastPoint.current = null;
-  };
-
-  // Touch event handlers for mobile/tablet support
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      setIsDrawing(true);
-      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    if (drawingMode === 'eraser') {
+      // Eraser mode: use destination-out to actually erase
+      const eraserWidth = getEraserSize();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = eraserWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
+        { x, y, color: 'eraser', size: eraserWidth },
+      ];
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else {
+      // Normal pen mode
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        { x, y, color: brushColor, size: brushSize },
+      ];
+      
+      // Add points to current stroke
+      setCurrentStroke(prev => [...prev, ...points]);
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
     
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
-    
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
     
     lastPoint.current = { x, y };
@@ -646,6 +861,27 @@ function App() {
     e.preventDefault();
     setIsDrawing(false);
     lastPoint.current = null;
+  };
+
+  const handleLoadBoard = async (boardId: string) => {
+    try {
+      const apiUrl = `http://${window.location.hostname}:8081/api/boards`;
+      const response = await fetch(`${apiUrl}/load/${boardId}`);
+      const data = await response.json();
+      
+      if (data.success && data.board) {
+        // Load shapes and strokes
+        setShapes(data.board.shapes || []);
+        setStrokes(data.board.strokes || []);
+        // Clear existing drawings
+        clearCanvas();
+        // Redraw with loaded shapes and strokes
+        redrawCanvas();
+      }
+    } catch (error) {
+      console.error('Failed to load board:', error);
+      alert('Failed to load board');
+    }
   };
 
   if (view === 'login') {
@@ -654,38 +890,74 @@ function App() {
 
   if (view === 'roomList') {
     return (
-      <RoomList
-        rooms={rooms}
-        username={username}
-        onCreateRoom={handleCreateRoom}
-        onJoinRoom={handleJoinRoom}
-        onLogout={handleLogout}
-      />
+      <>
+        <RoomList
+          rooms={rooms}
+          username={username}
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          onLogout={handleLogout}
+          activeUsers={activeUsers}
+          onRequestActiveUsers={requestActiveUsers}
+        />
+        {notification && (
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            onClose={() => setNotification(null)}
+            duration={5000}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <Whiteboard
-      canvasRef={canvasRef}
-      roomName={currentRoom?.roomName || 'Whiteboard'}
-      username={username}
-      participants={currentRoom?.participants || 1}
-      brushColor={brushColor}
-      brushSize={brushSize}
-      connectionStatus={connectionStatus}
-      userCursors={userCursors}
-      onBrushColorChange={setBrushColor}
-      onBrushSizeChange={setBrushSize}
-      onClearCanvas={handleClearClick}
-      onLeaveRoom={handleLeaveRoom}
-      onMouseDown={startDrawing}
-      onMouseMove={handleMouseMove}
-      onMouseUp={stopDrawing}
-      onMouseLeave={stopDrawing}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    />
+    <>
+      <Whiteboard
+        canvasRef={canvasRef}
+        roomName={currentRoom?.roomName || 'Whiteboard'}
+        username={username}
+        participants={currentRoom?.participants || 1}
+        brushColor={brushColor}
+        brushSize={brushSize}
+        eraserSize={eraserSize}
+        connectionStatus={connectionStatus}
+        drawingMode={drawingMode}
+        userCursors={userCursors}
+        onBrushColorChange={setBrushColor}
+        onBrushSizeChange={setBrushSize}
+        onEraserSizeChange={setEraserSize}
+        onDrawingModeChange={setDrawingMode}
+        onClearCanvas={handleClearClick}
+        onLeaveRoom={handleLeaveRoom}
+        onMouseDown={startDrawing}
+        onMouseMove={handleMouseMove}
+        onMouseUp={stopDrawing}
+        onMouseLeave={stopDrawing}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onOpenBoardManager={() => setBoardManagerOpen(true)}
+      />
+      <BoardManager
+        isOpen={boardManagerOpen}
+        onClose={() => setBoardManagerOpen(false)}
+        currentRoomId={currentRoom?.roomId || ''}
+        username={username}
+        onLoadBoard={handleLoadBoard}
+        shapes={shapes}
+        strokes={strokes}
+      />
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+          duration={5000}
+        />
+      )}
+    </>
   );
 }
 
