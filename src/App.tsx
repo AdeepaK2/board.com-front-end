@@ -4,6 +4,7 @@ import { LoginView } from './components/LoginView';
 import { RoomList } from './components/RoomList';
 import { Whiteboard } from './components/Whiteboard';
 import { BoardManager } from './components/BoardManager';
+import Notification from './components/Notification';
 import type { DrawingMode, Shape } from './types';
 import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
 
@@ -46,6 +47,7 @@ interface WebSocketMessage {
   shape?: Shape;
   shapeId?: string;
   updates?: Partial<Shape>;
+  creator?: string;
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -63,6 +65,7 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
@@ -218,6 +221,15 @@ function App() {
       case 'userLeft':
         if (currentRoom) {
           setCurrentRoom({ ...currentRoom, participants: message.participants || currentRoom.participants });
+        }
+        break;
+      case 'newPublicRoom':
+        // Show notification when a new public room is created (but not to the creator)
+        if (message.roomName && message.creator && message.creator !== username) {
+          setNotification({
+            message: `🎨 ${message.creator} created a new room: "${message.roomName}"`,
+            type: 'info'
+          });
         }
         break;
     }
@@ -851,13 +863,23 @@ function App() {
 
   if (view === 'roomList') {
     return (
-      <RoomList
-        rooms={rooms}
-        username={username}
-        onCreateRoom={handleCreateRoom}
-        onJoinRoom={handleJoinRoom}
-        onLogout={handleLogout}
-      />
+      <>
+        <RoomList
+          rooms={rooms}
+          username={username}
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          onLogout={handleLogout}
+        />
+        {notification && (
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            onClose={() => setNotification(null)}
+            duration={5000}
+          />
+        )}
+      </>
     );
   }
 
@@ -898,6 +920,14 @@ function App() {
         shapes={shapes}
         strokes={strokes}
       />
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+          duration={5000}
+        />
+      )}
     </>
   );
 }
