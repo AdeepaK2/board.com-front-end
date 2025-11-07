@@ -10,11 +10,13 @@ interface WhiteboardProps {
   participants: number;
   brushColor: string;
   brushSize: number;
+  eraserSize: number;
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
+  onEraserSizeChange: (size: number) => void;
   onDrawingModeChange: (mode: DrawingMode) => void;
   onClearCanvas: () => void;
   onLeaveRoom: () => void;
@@ -35,11 +37,13 @@ export const Whiteboard = ({
   participants,
   brushColor,
   brushSize,
+  eraserSize,
   connectionStatus,
   drawingMode,
   userCursors,
   onBrushColorChange,
   onBrushSizeChange,
+  onEraserSizeChange,
   onDrawingModeChange,
   onClearCanvas,
   onLeaveRoom,
@@ -85,6 +89,13 @@ export const Whiteboard = ({
             title="Pen Tool"
           >
             <Palette size={18} />
+          </button>
+          <button 
+            className={`tool-btn ${drawingMode === 'eraser' ? 'active' : ''}`}
+            onClick={() => onDrawingModeChange('eraser')}
+            title="Eraser Tool"
+          >
+            <Eraser size={18} />
           </button>
           <button 
             className={`tool-btn ${drawingMode === 'select' ? 'active' : ''}`}
@@ -148,21 +159,58 @@ export const Whiteboard = ({
               value={brushColor}
               onChange={(e) => onBrushColorChange(e.target.value)}
               className="color-picker"
+              disabled={drawingMode === 'eraser'}
             />
           </label>
 
-          <label className="control-item">
-            <span>Size:</span>
-            <input
-              type="range"
-              min="1"
-              max="20"
-              value={brushSize}
-              onChange={(e) => onBrushSizeChange(Number(e.target.value))}
-              className="size-slider"
-            />
-            <span className="size-value">{brushSize}px</span>
-          </label>
+          {drawingMode === 'eraser' ? (
+            <label className="control-item">
+              <span>Eraser Size:</span>
+              <div className="eraser-size-buttons">
+                <button 
+                  className={`size-btn ${eraserSize === 1 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(1)}
+                  title="Small (10px)"
+                >
+                  S
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 2 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(2)}
+                  title="Medium (20px)"
+                >
+                  M
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 3 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(3)}
+                  title="Large (40px)"
+                >
+                  L
+                </button>
+                <button 
+                  className={`size-btn ${eraserSize === 4 ? 'active' : ''}`}
+                  onClick={() => onEraserSizeChange(4)}
+                  title="Extra Large (80px)"
+                >
+                  XL
+                </button>
+              </div>
+            </label>
+          ) : (
+            <label className="control-item">
+              <span>Size:</span>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                value={brushSize}
+                onChange={(e) => onBrushSizeChange(Number(e.target.value))}
+                className="size-slider"
+              />
+              <span className="size-value">{brushSize}px</span>
+            </label>
+          )}
 
           <button onClick={onClearCanvas} className="btn-clear">
             <Eraser size={18} />

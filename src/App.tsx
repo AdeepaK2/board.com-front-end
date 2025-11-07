@@ -59,6 +59,7 @@ function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [brushColor, setBrushColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(3);
+  const [eraserSize, setEraserSize] = useState(2); // 1=small, 2=medium, 3=large, 4=extra-large
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
@@ -87,6 +88,12 @@ function App() {
   })();
   
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
+
+  // Calculate eraser size based on selection (1-4)
+  const getEraserSize = () => {
+    const sizes = [10, 20, 40, 80]; // small, medium, large, extra-large
+    return sizes[eraserSize - 1] || 20;
+  };
 
   useEffect(() => {
     // Display connection info in console
@@ -281,7 +288,16 @@ function App() {
       for (let i = 0; i < stroke.points.length - 1; i++) {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
-        ctx.strokeStyle = start.color;
+        
+        if (start.color === 'eraser') {
+          // Apply eraser stroke
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = start.color;
+        }
+        
         ctx.lineWidth = start.size;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -291,6 +307,8 @@ function App() {
         ctx.stroke();
       }
     });
+    
+    ctx.globalCompositeOperation = 'source-over'; // Reset
     
     // Redraw all shapes
     shapes.forEach(shape => {
@@ -399,7 +417,16 @@ function App() {
     for (let i = 0; i < points.length - 1; i++) {
       const start = points[i];
       const end = points[i + 1];
-      ctx.strokeStyle = start.color;
+      
+      if (start.color === 'eraser') {
+        // Draw eraser stroke
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+      } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = start.color;
+      }
+      
       ctx.lineWidth = start.size;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -408,6 +435,7 @@ function App() {
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
     }
+    ctx.globalCompositeOperation = 'source-over'; // Reset
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -422,6 +450,10 @@ function App() {
       lastPoint.current = { x, y };
       // Start a new stroke
       setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+    } else if (drawingMode === 'eraser') {
+      setIsDrawing(true);
+      lastPoint.current = { x, y };
+      // Start eraser stroke - don't add to currentStroke since we don't save eraser strokes
     } else if (drawingMode === 'fill' && currentRoom) {
       // Fill clicked shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
@@ -496,23 +528,50 @@ function App() {
     const y = e.clientY - rect.top;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
     
-    // Add points to current stroke
-    setCurrentStroke(prev => [...prev, ...points]);
+    if (drawingMode === 'eraser') {
+      // Eraser mode: use destination-out to actually erase
+      const eraserWidth = getEraserSize();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = eraserWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
+      
+      // Don't store eraser strokes - just erase visually
+      // Send erase message to other users
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
+        { x, y, color: 'eraser', size: eraserWidth },
+      ];
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else {
+      // Normal pen mode
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        { x, y, color: brushColor, size: brushSize },
+      ];
+      
+      // Add points to current stroke
+      setCurrentStroke(prev => [...prev, ...points]);
+      
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    }
     
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     lastPoint.current = { x, y };
   };
 
@@ -690,8 +749,14 @@ function App() {
     const touch = e.touches[0];
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
       setIsDrawing(true);
-      lastPoint.current = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+      lastPoint.current = { x, y };
+      // Start pen stroke only (eraser doesn't need currentStroke)
+      if (drawingMode === 'pen') {
+        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+      }
     }
   };
 
@@ -708,21 +773,46 @@ function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    ctx.strokeStyle = brushColor;
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    if (drawingMode === 'eraser') {
+      // Eraser mode: use destination-out to actually erase
+      const eraserWidth = getEraserSize();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = eraserWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
+        { x, y, color: 'eraser', size: eraserWidth },
+      ];
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else {
+      // Normal pen mode
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        { x, y, color: brushColor, size: brushSize },
+      ];
+      
+      // Add points to current stroke
+      setCurrentStroke(prev => [...prev, ...points]);
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    }
     
-    const points = [
-      { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
-      { x, y, color: brushColor, size: brushSize },
-    ];
-    
-    sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
     
     lastPoint.current = { x, y };
@@ -780,11 +870,13 @@ function App() {
         participants={currentRoom?.participants || 1}
         brushColor={brushColor}
         brushSize={brushSize}
+        eraserSize={eraserSize}
         connectionStatus={connectionStatus}
         drawingMode={drawingMode}
         userCursors={userCursors}
         onBrushColorChange={setBrushColor}
         onBrushSizeChange={setBrushSize}
+        onEraserSizeChange={setEraserSize}
         onDrawingModeChange={setDrawingMode}
         onClearCanvas={handleClearClick}
         onLeaveRoom={handleLeaveRoom}

@@ -34,7 +34,7 @@ export interface BoardData {
   strokes: { points: DrawPoint[] }[];
 }
 
-export type DrawingMode = 'pen' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text';
+export type DrawingMode = 'pen' | 'eraser' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text';
 
 export interface Room {
   roomId: string;
