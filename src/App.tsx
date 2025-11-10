@@ -523,8 +523,9 @@ function App() {
         return;
       }
       
-      // Handle delete for selected shapes
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom) {
+      // Handle delete for selected shapes (only when NOT editing text)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom && !editingTextId) {
+        e.preventDefault(); // Prevent browser navigation on backspace
         // Delete selected shape
         setShapes(prev => prev.filter(shape => shape.id !== selectedShapeId));
         sendMessage({
