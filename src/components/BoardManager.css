@@ -254,6 +254,7 @@
 }
 
 .btn-load,
+.btn-timelapse,
 .btn-export,
 .btn-delete {
   padding: 8px;
@@ -273,6 +274,16 @@
 
 .btn-load:hover {
   background: #3b82f6;
+  color: white;
+}
+
+.btn-timelapse {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.btn-timelapse:hover {
+  background: #f59e0b;
   color: white;
 }
 
