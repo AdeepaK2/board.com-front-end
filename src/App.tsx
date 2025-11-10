@@ -627,8 +627,8 @@ function App() {
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
-    if (drawingMode === 'pen' && isDrawing && lastPoint.current) {
-      // Draw freehand
+    if ((drawingMode === 'pen' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
+      // Draw freehand or erase
       draw(e);
     } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
       const shape = shapes.find(s => s.id === selectedShapeId);
