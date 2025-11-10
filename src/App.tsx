@@ -75,6 +75,7 @@ function App() {
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
+  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>([]); // Store eraser paths
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
@@ -167,9 +168,21 @@ function App() {
         if (message.username !== username && message.points) {
           drawPoints(message.points);
           // Store incoming stroke points (they come in small segments)
-          // But DON'T store eraser strokes - they can't be replayed
           const isEraser = message.points.some(p => p.color === 'eraser');
-          if (!isEraser) {
+          if (isEraser) {
+            // Store eraser strokes separately
+            setEraserStrokes(prev => {
+              if (prev.length === 0 || !message.points) {
+                return message.points ? [{ points: message.points }] : prev;
+              }
+              // Append to last eraser stroke
+              const last = prev[prev.length - 1];
+              const updated = [...prev];
+              updated[updated.length - 1] = { points: [...last.points, ...message.points] };
+              return updated;
+            });
+          } else {
+            // Store regular drawing strokes
             setStrokes(prev => {
               if (prev.length === 0 || !message.points) {
                 return message.points ? [{ points: message.points }] : prev;
@@ -363,8 +376,9 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
-    // Clear strokes as well
+    // Clear strokes and eraser strokes
     setStrokes([]);
+    setEraserStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -416,6 +430,27 @@ function App() {
     
     ctx.globalCompositeOperation = 'source-over'; // Reset
     
+    // Apply eraser strokes AFTER drawing everything
+    eraserStrokes.forEach(stroke => {
+      if (stroke.points.length < 2) return;
+      for (let i = 0; i < stroke.points.length - 1; i++) {
+        const start = stroke.points[i];
+        const end = stroke.points[i + 1];
+        
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.lineWidth = start.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    });
+    
+    ctx.globalCompositeOperation = 'source-over'; // Reset
+    
     // Redraw all shapes
     shapes.forEach(shape => {
       drawShape(ctx, shape);
@@ -424,7 +459,7 @@ function App() {
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, strokes, selectedShapeId]);
+  }, [shapes, strokes, eraserStrokes, selectedShapeId]);
 
   // Auto-redraw when shapes or strokes change
   useEffect(() => {
@@ -560,7 +595,9 @@ function App() {
     } else if (drawingMode === 'eraser') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
-      // Start eraser stroke - don't add to currentStroke since we don't save eraser strokes
+      // Start eraser stroke - track eraser path
+      const eraserWidth = getEraserSize();
+      setCurrentStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
     } else if (drawingMode === 'fill' && currentRoom) {
       // Fill clicked shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
@@ -650,12 +687,14 @@ function App() {
       ctx.stroke();
       ctx.globalCompositeOperation = 'source-over'; // Reset to normal
       
-      // Don't store eraser strokes - just erase visually
-      // Send erase message to other users
+      // Store eraser stroke points
       const points = [
         { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
         { x, y, color: 'eraser', size: eraserWidth },
       ];
+      setCurrentStroke(prev => [...prev, ...points]);
+      
+      // Send erase message to other users
       sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     } else if (drawingMode === 'brush') {
       // Brush mode: thick artistic stroke
@@ -838,8 +877,9 @@ function App() {
       setCurrentStroke([]);
     }
     
-    // Clear current stroke for eraser (don't save it)
-    if (isDrawing && drawingMode === 'eraser') {
+    // Save eraser stroke
+    if (isDrawing && drawingMode === 'eraser' && currentStroke.length > 0) {
+      setEraserStrokes(prev => [...prev, { points: currentStroke }]);
       setCurrentStroke([]);
     }
     
