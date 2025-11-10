@@ -167,17 +167,20 @@ function App() {
         if (message.username !== username && message.points) {
           drawPoints(message.points);
           // Store incoming stroke points (they come in small segments)
-          // We'll append them to the last stroke or create new one
-          setStrokes(prev => {
-            if (prev.length === 0 || !message.points) {
-              return message.points ? [{ points: message.points }] : prev;
-            }
-            // Append to last stroke
-            const last = prev[prev.length - 1];
-            const updated = [...prev];
-            updated[updated.length - 1] = { points: [...last.points, ...message.points] };
-            return updated;
-          });
+          // But DON'T store eraser strokes - they can't be replayed
+          const isEraser = message.points.some(p => p.color === 'eraser');
+          if (!isEraser) {
+            setStrokes(prev => {
+              if (prev.length === 0 || !message.points) {
+                return message.points ? [{ points: message.points }] : prev;
+              }
+              // Append to last stroke
+              const last = prev[prev.length - 1];
+              const updated = [...prev];
+              updated[updated.length - 1] = { points: [...last.points, ...message.points] };
+              return updated;
+            });
+          }
         }
         break;
       case 'addShape':
@@ -380,33 +383,27 @@ function App() {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
         
-        if (start.color === 'eraser') {
-          // Apply eraser stroke
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.strokeStyle = 'rgba(0,0,0,1)';
-          ctx.lineWidth = start.size;
+        // Skip eraser strokes if any somehow got stored
+        if (start.color === 'eraser') continue;
+        
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = start.color;
+        ctx.lineWidth = start.size;
+        
+        // Detect pen type based on size multiplier
+        const baseSize = start.size;
+        if (baseSize > 15) { // Marker (size * 3)
+          ctx.lineCap = 'square';
+          ctx.lineJoin = 'miter';
+          ctx.globalAlpha = 0.3;
+        } else if (baseSize > 8) { // Brush (size * 2.5)
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-        } else {
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.strokeStyle = start.color;
-          ctx.lineWidth = start.size;
-          
-          // Detect pen type based on size multiplier
-          const baseSize = start.size;
-          if (baseSize > 15) { // Marker (size * 3)
-            ctx.lineCap = 'square';
-            ctx.lineJoin = 'miter';
-            ctx.globalAlpha = 0.3;
-          } else if (baseSize > 8) { // Brush (size * 2.5)
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = 0.8;
-          } else { // Regular pen
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = 1.0;
-          }
+          ctx.globalAlpha = 0.8;
+        } else { // Regular pen
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.globalAlpha = 1.0;
         }
         
         ctx.beginPath();
@@ -554,11 +551,12 @@ function App() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    if (drawingMode === 'pen') {
+    if (drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
       // Start a new stroke
-      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+      const size = drawingMode === 'brush' ? brushSize * 2.5 : drawingMode === 'marker' ? brushSize * 3 : brushSize;
+      setCurrentStroke([{ x, y, color: brushColor, size }]);
     } else if (drawingMode === 'eraser') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
@@ -737,7 +735,8 @@ function App() {
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
-    if ((drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
+    // Don't allow pen/brush/marker drawing when in shape mode
+    if ((drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker' || drawingMode === 'eraser') && isDrawing && lastPoint.current && !isDrawingShape) {
       // Draw freehand or erase
       draw(e);
     } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
@@ -833,9 +832,14 @@ function App() {
   };
 
   const stopDrawing = () => {
-    // Save current stroke if drawing with pen
-    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
+    // Save current stroke if drawing with pen, brush, or marker (but NOT eraser)
+    if (isDrawing && (drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker') && currentStroke.length > 0) {
       setStrokes(prev => [...prev, { points: currentStroke }]);
+      setCurrentStroke([]);
+    }
+    
+    // Clear current stroke for eraser (don't save it)
+    if (isDrawing && drawingMode === 'eraser') {
       setCurrentStroke([]);
     }
     
@@ -902,9 +906,10 @@ function App() {
       const y = touch.clientY - rect.top;
       setIsDrawing(true);
       lastPoint.current = { x, y };
-      // Start pen stroke only (eraser doesn't need currentStroke)
-      if (drawingMode === 'pen') {
-        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+      // Start stroke for pen, brush, or marker
+      if (drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker') {
+        const size = drawingMode === 'brush' ? brushSize * 2.5 : drawingMode === 'marker' ? brushSize * 3 : brushSize;
+        setCurrentStroke([{ x, y, color: brushColor, size }]);
       }
     }
   };

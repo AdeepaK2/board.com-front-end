@@ -61,6 +61,13 @@ export const Whiteboard = ({
   onOpenBoardManager,
 }: WhiteboardProps) => {
   const [showShapesDropdown, setShowShapesDropdown] = useState(false);
+  const [showDrawToolsDropdown, setShowDrawToolsDropdown] = useState(false);
+
+  const drawTools = [
+    { mode: 'pen' as DrawingMode, icon: Palette, label: 'Pen' },
+    { mode: 'brush' as DrawingMode, icon: Brush, label: 'Brush' },
+    { mode: 'marker' as DrawingMode, icon: Highlighter, label: 'Marker' },
+  ];
 
   const shapeTools = [
     { mode: 'rectangle' as DrawingMode, icon: Square, label: 'Rectangle' },
@@ -70,7 +77,9 @@ export const Whiteboard = ({
   ];
 
   const isShapeMode = ['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode);
-  const currentShapeTool = shapeTools.find(tool => tool.mode === drawingMode) || shapeTools[0];
+  const isDrawToolMode = ['pen', 'brush', 'marker'].includes(drawingMode);
+  const currentShapeTool = shapeTools.find(tool => tool.mode === drawingMode);
+  const currentDrawTool = drawTools.find(tool => tool.mode === drawingMode);
 
   return (
     <div className="whiteboard-view">
@@ -87,27 +96,37 @@ export const Whiteboard = ({
         </div>
 
         <div className="toolbar-section drawing-tools">
-          <button 
-            className={`tool-btn ${drawingMode === 'pen' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('pen')}
-            title="Pen Tool"
-          >
-            <Palette size={18} />
-          </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'brush' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('brush')}
-            title="Brush Tool (Thick Stroke)"
-          >
-            <Brush size={18} />
-          </button>
-          <button 
-            className={`tool-btn ${drawingMode === 'marker' ? 'active' : ''}`}
-            onClick={() => onDrawingModeChange('marker')}
-            title="Marker Tool (Highlighter)"
-          >
-            <Highlighter size={18} />
-          </button>
+          {/* Drawing Tools Dropdown */}
+          <div className="shapes-dropdown">
+            <button 
+              className={`tool-btn ${isDrawToolMode ? 'active' : ''}`}
+              onClick={() => setShowDrawToolsDropdown(!showDrawToolsDropdown)}
+              title="Drawing Tools"
+            >
+              {isDrawToolMode && currentDrawTool ? <currentDrawTool.icon size={18} /> : <Palette size={18} />}
+              <ChevronDown size={14} className="dropdown-icon" />
+            </button>
+            {showDrawToolsDropdown && (
+              <div className="dropdown-menu">
+                {drawTools.map(({ mode, icon: Icon, label }) => (
+                  <button
+                    key={mode}
+                    className={`dropdown-item ${drawingMode === mode ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDrawingModeChange(mode);
+                      setShowDrawToolsDropdown(false);
+                      setShowShapesDropdown(false);
+                    }}
+                  >
+                    <Icon size={16} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button 
             className={`tool-btn ${drawingMode === 'eraser' ? 'active' : ''}`}
             onClick={() => onDrawingModeChange('eraser')}
@@ -130,7 +149,7 @@ export const Whiteboard = ({
               onClick={() => setShowShapesDropdown(!showShapesDropdown)}
               title="Shapes"
             >
-              {isShapeMode ? <currentShapeTool.icon size={18} /> : <Shapes size={18} />}
+              {isShapeMode && currentShapeTool ? <currentShapeTool.icon size={18} /> : <Shapes size={18} />}
               <ChevronDown size={14} className="dropdown-icon" />
             </button>
             {showShapesDropdown && (
@@ -139,9 +158,11 @@ export const Whiteboard = ({
                   <button
                     key={mode}
                     className={`dropdown-item ${drawingMode === mode ? 'active' : ''}`}
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       onDrawingModeChange(mode);
                       setShowShapesDropdown(false);
+                      setShowDrawToolsDropdown(false);
                     }}
                   >
                     <Icon size={16} />
