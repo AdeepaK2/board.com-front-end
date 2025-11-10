@@ -42,6 +42,7 @@ interface WebSocketMessage {
   isDrawing?: boolean;
   participants?: number;
   message?: string;
+  success?: boolean;
   isPublic?: boolean;
   password?: string | null;
   shape?: Shape;
@@ -141,6 +142,8 @@ function App() {
   }, [serverUrl]);
 
   const handleWebSocketMessage = (message: WebSocketMessage) => {
+    console.log('Received message:', message.type, message);
+    
     switch (message.type) {
       case 'roomList':
         setRooms(message.rooms || []);
@@ -258,10 +261,58 @@ function App() {
     }
   };
 
-  const handleLogin = (name: string) => {
+  const handleLogin = async (name: string, password: string, isNewUser: boolean) => {
     setUsername(name);
-    sendMessage({ type: 'setUsername', username: name });
-    setView('roomList');
+    
+    console.log('handleLogin called:', { name, isNewUser });
+    
+    const API_BASE_URL = `http://${window.location.hostname}:8081/api/auth`;
+    
+    try {
+      if (isNewUser) {
+        // Register via REST API
+        console.log('Sending register request');
+        const response = await fetch(`${API_BASE_URL}/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: name, password })
+        });
+        
+        const data = await response.json();
+        console.log('Register response:', data);
+        
+        if (data.success) {
+          setNotification({ message: '✅ Registration successful! You can now login.', type: 'success' });
+        } else {
+          setNotification({ message: `❌ ${data.message || 'Registration failed'}`, type: 'error' });
+        }
+      } else {
+        // Login via REST API
+        console.log('Sending login request');
+        const response = await fetch(`${API_BASE_URL}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: name, password })
+        });
+        
+        const data = await response.json();
+        console.log('Login response:', data);
+        
+        if (data.success) {
+          // Save username to localStorage for next visit
+          localStorage.setItem('whiteboard_username', name);
+          // Send setUsername to WebSocket to join the server
+          sendMessage({ type: 'setUsername', username: name });
+          setView('roomList');
+          setNotification({ message: '✅ Login successful!', type: 'success' });
+        } else {
+          setNotification({ message: `❌ ${data.message || 'Login failed'}`, type: 'error' });
+        }
+      }
+    } catch (error) {
+      console.error('Auth error:', error);
+      setNotification({ message: '❌ Connection error. Please try again.', type: 'error' });
+    }
   };
 
   const requestActiveUsers = () => {
@@ -627,8 +678,8 @@ function App() {
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
-    if (drawingMode === 'pen' && isDrawing && lastPoint.current) {
-      // Draw freehand
+    if ((drawingMode === 'pen' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
+      // Draw freehand or erase
       draw(e);
     } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
       const shape = shapes.find(s => s.id === selectedShapeId);
@@ -885,7 +936,18 @@ function App() {
   };
 
   if (view === 'login') {
-    return <LoginView onLogin={handleLogin} />;
+    return (
+      <>
+        <LoginView onLogin={handleLogin} />
+        {notification && (
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            onClose={() => setNotification(null)}
+          />
+        )}
+      </>
+    );
   }
 
   if (view === 'roomList') {
