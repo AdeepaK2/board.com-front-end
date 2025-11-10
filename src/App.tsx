@@ -84,6 +84,7 @@ function App() {
   const [editingText, setEditingText] = useState<string>('');
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
+  const [textSize, setTextSize] = useState<number>(16); // Font size for text tool
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -383,18 +384,36 @@ function App() {
           // Apply eraser stroke
           ctx.globalCompositeOperation = 'destination-out';
           ctx.strokeStyle = 'rgba(0,0,0,1)';
+          ctx.lineWidth = start.size;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
         } else {
           ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = start.color;
+          ctx.lineWidth = start.size;
+          
+          // Detect pen type based on size multiplier
+          const baseSize = start.size;
+          if (baseSize > 15) { // Marker (size * 3)
+            ctx.lineCap = 'square';
+            ctx.lineJoin = 'miter';
+            ctx.globalAlpha = 0.3;
+          } else if (baseSize > 8) { // Brush (size * 2.5)
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 0.8;
+          } else { // Regular pen
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 1.0;
+          }
         }
         
-        ctx.lineWidth = start.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
         ctx.stroke();
+        ctx.globalAlpha = 1.0; // Reset
       }
     });
     
@@ -591,7 +610,7 @@ function App() {
         size: brushSize,
         username: username,
         text: '',
-        fontSize: 16
+        fontSize: textSize
       };
       
       console.log('Creating text shape:', newShape);
@@ -640,6 +659,46 @@ function App() {
         { x, y, color: 'eraser', size: eraserWidth },
       ];
       sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else if (drawingMode === 'brush') {
+      // Brush mode: thick artistic stroke
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize * 2.5; // Thicker than pen
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = 0.8; // Slightly transparent
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0; // Reset
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize * 2.5 },
+        { x, y, color: brushColor, size: brushSize * 2.5 },
+      ];
+      
+      setCurrentStroke(prev => [...prev, ...points]);
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+    } else if (drawingMode === 'marker') {
+      // Marker mode: semi-transparent highlighter
+      ctx.strokeStyle = brushColor;
+      ctx.lineWidth = brushSize * 3; // Even thicker
+      ctx.lineCap = 'square';
+      ctx.lineJoin = 'miter';
+      ctx.globalAlpha = 0.3; // Very transparent
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0; // Reset
+      
+      const points = [
+        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize * 3 },
+        { x, y, color: brushColor, size: brushSize * 3 },
+      ];
+      
+      setCurrentStroke(prev => [...prev, ...points]);
+      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     } else {
       // Normal pen mode
       ctx.strokeStyle = brushColor;
@@ -678,7 +737,7 @@ function App() {
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
-    if ((drawingMode === 'pen' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
+    if ((drawingMode === 'pen' || drawingMode === 'brush' || drawingMode === 'marker' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
       // Draw freehand or erase
       draw(e);
     } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
@@ -984,12 +1043,14 @@ function App() {
         brushColor={brushColor}
         brushSize={brushSize}
         eraserSize={eraserSize}
+        textSize={textSize}
         connectionStatus={connectionStatus}
         drawingMode={drawingMode}
         userCursors={userCursors}
         onBrushColorChange={setBrushColor}
         onBrushSizeChange={setBrushSize}
         onEraserSizeChange={setEraserSize}
+        onTextSizeChange={setTextSize}
         onDrawingModeChange={setDrawingMode}
         onClearCanvas={handleClearClick}
         onLeaveRoom={handleLeaveRoom}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
+import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type, Brush, Highlighter } from 'lucide-react';
 import './Whiteboard.css';
 import type { DrawingMode } from '../types';
 
@@ -11,12 +11,14 @@ interface WhiteboardProps {
   brushColor: string;
   brushSize: number;
   eraserSize: number;
+  textSize: number;
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
   onEraserSizeChange: (size: number) => void;
+  onTextSizeChange: (size: number) => void;
   onDrawingModeChange: (mode: DrawingMode) => void;
   onClearCanvas: () => void;
   onLeaveRoom: () => void;
@@ -38,12 +40,14 @@ export const Whiteboard = ({
   brushColor,
   brushSize,
   eraserSize,
+  textSize,
   connectionStatus,
   drawingMode,
   userCursors,
   onBrushColorChange,
   onBrushSizeChange,
   onEraserSizeChange,
+  onTextSizeChange,
   onDrawingModeChange,
   onClearCanvas,
   onLeaveRoom,
@@ -89,6 +93,20 @@ export const Whiteboard = ({
             title="Pen Tool"
           >
             <Palette size={18} />
+          </button>
+          <button 
+            className={`tool-btn ${drawingMode === 'brush' ? 'active' : ''}`}
+            onClick={() => onDrawingModeChange('brush')}
+            title="Brush Tool (Thick Stroke)"
+          >
+            <Brush size={18} />
+          </button>
+          <button 
+            className={`tool-btn ${drawingMode === 'marker' ? 'active' : ''}`}
+            onClick={() => onDrawingModeChange('marker')}
+            title="Marker Tool (Highlighter)"
+          >
+            <Highlighter size={18} />
           </button>
           <button 
             className={`tool-btn ${drawingMode === 'eraser' ? 'active' : ''}`}
@@ -196,6 +214,19 @@ export const Whiteboard = ({
                   XL
                 </button>
               </div>
+            </label>
+          ) : drawingMode === 'text' ? (
+            <label className="control-item">
+              <span>Text Size:</span>
+              <input
+                type="range"
+                min="12"
+                max="72"
+                value={textSize}
+                onChange={(e) => onTextSizeChange(Number(e.target.value))}
+                className="size-slider"
+              />
+              <span className="size-value">{textSize}px</span>
             </label>
           ) : (
             <label className="control-item">
