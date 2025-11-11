@@ -55,6 +55,146 @@ interface WebSocketMessage {
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
 
+// Helper function to check if eraser is touching a shape
+function isShapeTouchedByEraser(eraserX: number, eraserY: number, eraserRadius: number, shape: Shape): boolean {
+  switch (shape.type) {
+    case 'text': {
+      if (shape.text) {
+        // Measure text bounds
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const fontSize = shape.fontSize || 16;
+          ctx.font = `${fontSize}px Arial`;
+          const textWidth = ctx.measureText(shape.text).width;
+          const textHeight = fontSize;
+          
+          // Check if eraser circle intersects with text rectangle
+          const rectLeft = shape.x;
+          const rectRight = shape.x + textWidth;
+          const rectTop = shape.y;
+          const rectBottom = shape.y + textHeight;
+          
+          // Find closest point on rectangle to eraser center
+          const closestX = Math.max(rectLeft, Math.min(eraserX, rectRight));
+          const closestY = Math.max(rectTop, Math.min(eraserY, rectBottom));
+          
+          // Check distance from eraser center to closest point
+          const dx = eraserX - closestX;
+          const dy = eraserY - closestY;
+          return (dx * dx + dy * dy) <= (eraserRadius * eraserRadius);
+        }
+      }
+      return false;
+    }
+    
+    case 'rectangle': {
+      if (shape.width && shape.height) {
+        const rectLeft = Math.min(shape.x, shape.x + shape.width);
+        const rectRight = Math.max(shape.x, shape.x + shape.width);
+        const rectTop = Math.min(shape.y, shape.y + shape.height);
+        const rectBottom = Math.max(shape.y, shape.y + shape.height);
+        
+        const closestX = Math.max(rectLeft, Math.min(eraserX, rectRight));
+        const closestY = Math.max(rectTop, Math.min(eraserY, rectBottom));
+        
+        const dx = eraserX - closestX;
+        const dy = eraserY - closestY;
+        return (dx * dx + dy * dy) <= (eraserRadius * eraserRadius);
+      }
+      return false;
+    }
+    
+    case 'circle': {
+      if (shape.radius) {
+        const dx = eraserX - shape.x;
+        const dy = eraserY - shape.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        // Eraser touches circle if distance between centers is less than sum of radii
+        return distance <= (eraserRadius + shape.radius);
+      }
+      return false;
+    }
+    
+    case 'line': {
+      if (shape.endX !== undefined && shape.endY !== undefined) {
+        // Calculate distance from eraser center to line segment
+        const dx = shape.endX - shape.x;
+        const dy = shape.endY - shape.y;
+        const lengthSquared = dx * dx + dy * dy;
+        
+        if (lengthSquared === 0) {
+          // Line is a point
+          const pdx = eraserX - shape.x;
+          const pdy = eraserY - shape.y;
+          return Math.sqrt(pdx * pdx + pdy * pdy) <= eraserRadius;
+        }
+        
+        const t = Math.max(0, Math.min(1, ((eraserX - shape.x) * dx + (eraserY - shape.y) * dy) / lengthSquared));
+        const projX = shape.x + t * dx;
+        const projY = shape.y + t * dy;
+        
+        const pdx = eraserX - projX;
+        const pdy = eraserY - projY;
+        return Math.sqrt(pdx * pdx + pdy * pdy) <= eraserRadius;
+      }
+      return false;
+    }
+    
+    case 'triangle': {
+      if (shape.width && shape.height) {
+        // Triangle vertices
+        const x1 = shape.x + shape.width / 2;
+        const y1 = shape.y;
+        const x2 = shape.x;
+        const y2 = shape.y + shape.height;
+        const x3 = shape.x + shape.width;
+        const y3 = shape.y + shape.height;
+        
+        // Check if eraser center is inside triangle
+        const area = 0.5 * (-y2 * x3 + y1 * (-x2 + x3) + x1 * (y2 - y3) + x2 * y3);
+        const s = (1 / (2 * area)) * (y1 * x3 - x1 * y3 + (y3 - y1) * eraserX + (x1 - x3) * eraserY);
+        const t = (1 / (2 * area)) * (x1 * y2 - y1 * x2 + (y1 - y2) * eraserX + (x2 - x1) * eraserY);
+        
+        if (s >= 0 && t >= 0 && 1 - s - t >= 0) {
+          return true; // Center is inside triangle
+        }
+        
+        // Check if eraser intersects any of the three edges
+        const distToEdge1 = distanceToLineSegment(eraserX, eraserY, x1, y1, x2, y2);
+        const distToEdge2 = distanceToLineSegment(eraserX, eraserY, x2, y2, x3, y3);
+        const distToEdge3 = distanceToLineSegment(eraserX, eraserY, x3, y3, x1, y1);
+        
+        return Math.min(distToEdge1, distToEdge2, distToEdge3) <= eraserRadius;
+      }
+      return false;
+    }
+    
+    default:
+      return false;
+  }
+}
+
+function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+  
+  if (lengthSquared === 0) {
+    const pdx = px - x1;
+    const pdy = py - y1;
+    return Math.sqrt(pdx * pdx + pdy * pdy);
+  }
+  
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
+  
+  const pdx = px - projX;
+  const pdy = py - projY;
+  return Math.sqrt(pdx * pdx + pdy * pdy);
+}
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -75,6 +215,7 @@ function App() {
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
+  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
@@ -84,6 +225,7 @@ function App() {
   const [editingText, setEditingText] = useState<string>('');
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
+  const [currentEraserStroke, setCurrentEraserStroke] = useState<DrawPoint[]>([]);
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -165,18 +307,20 @@ function App() {
       case 'draw':
         if (message.username !== username && message.points) {
           drawPoints(message.points);
-          // Store incoming stroke points (they come in small segments)
-          // We'll append them to the last stroke or create new one
-          setStrokes(prev => {
-            if (prev.length === 0 || !message.points) {
-              return message.points ? [{ points: message.points }] : prev;
+          // Check if this is an eraser stroke or pen stroke
+          const isEraserStroke = message.points.length > 0 && message.points[0].color === 'eraser';
+          
+          if (isEraserStroke) {
+            // Store incoming eraser stroke - always append to create continuous eraser path
+            if (message.points) {
+              setEraserStrokes(prev => [...prev, { points: message.points! }]);
             }
-            // Append to last stroke
-            const last = prev[prev.length - 1];
-            const updated = [...prev];
-            updated[updated.length - 1] = { points: [...last.points, ...message.points] };
-            return updated;
-          });
+          } else {
+            // Store incoming pen stroke - always append to create continuous pen path
+            if (message.points) {
+              setStrokes(prev => [...prev, { points: message.points! }]);
+            }
+          }
         }
         break;
       case 'addShape':
@@ -359,8 +503,9 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
-    // Clear strokes as well
+    // Clear strokes and eraser strokes
     setStrokes([]);
+    setEraserStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -379,15 +524,27 @@ function App() {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
         
-        if (start.color === 'eraser') {
-          // Apply eraser stroke
-          ctx.globalCompositeOperation = 'destination-out';
-          ctx.strokeStyle = 'rgba(0,0,0,1)';
-        } else {
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.strokeStyle = start.color;
-        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = start.color;
+        ctx.lineWidth = start.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    });
+    
+    // Apply eraser strokes
+    eraserStrokes.forEach(stroke => {
+      if (stroke.points.length < 2) return;
+      for (let i = 0; i < stroke.points.length - 1; i++) {
+        const start = stroke.points[i];
+        const end = stroke.points[i + 1];
         
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
         ctx.lineWidth = start.size;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -408,7 +565,7 @@ function App() {
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, strokes, selectedShapeId]);
+  }, [shapes, strokes, eraserStrokes, selectedShapeId]);
 
   // Auto-redraw when shapes or strokes change
   useEffect(() => {
@@ -416,12 +573,21 @@ function App() {
   }, [shapes, strokes, redrawCanvas]);
 
   const updateTextShape = useCallback((newText: string) => {
-    if (!editingTextId) return;
+    if (!editingTextId || !currentRoom) return;
     setShapes(prev => prev.map(shape => 
       shape.id === editingTextId ? { ...shape, text: newText } : shape
     ));
+    
+    // Send update to server so other clients see it in real-time
+    sendMessage({
+      type: 'updateShape',
+      roomId: currentRoom.roomId,
+      shapeId: editingTextId,
+      updates: { text: newText }
+    });
+    
     redrawCanvas();
-  }, [editingTextId, redrawCanvas]);
+  }, [editingTextId, currentRoom, redrawCanvas]);
 
   // Handle keyboard events for delete and text editing
   useEffect(() => {
@@ -435,27 +601,37 @@ function App() {
           const shape = shapes.find(s => s.id === editingTextId);
           if (shape && !shape.text) {
             setShapes(prev => prev.filter(s => s.id !== editingTextId));
+            if (currentRoom) {
+              sendMessage({
+                type: 'deleteShape',
+                roomId: currentRoom.roomId,
+                shapeId: editingTextId
+              });
+            }
           }
           setEditingTextId(null);
           setEditingText('');
           redrawCanvas();
         } else if (e.key === 'Enter' && !e.shiftKey) {
           // Finish text editing
-          if (editingText.trim() && currentRoom) {
+          if (editingText.trim()) {
             const shape = shapes.find(s => s.id === editingTextId);
             if (shape) {
               const updatedShape = { ...shape, text: editingText.trim() };
               setShapes(prev => prev.map(s => s.id === editingTextId ? updatedShape : s));
-              sendMessage({
-                type: 'addShape',
-                roomId: currentRoom.roomId,
-                shapeId: editingTextId,
-                shape: updatedShape
-              });
+              // No need to send addShape - shape was already sent when created,
+              // and updates were sent while typing
             }
           } else if (!editingText.trim()) {
             // Remove empty text
             setShapes(prev => prev.filter(s => s.id !== editingTextId));
+            if (currentRoom) {
+              sendMessage({
+                type: 'deleteShape',
+                roomId: currentRoom.roomId,
+                shapeId: editingTextId
+              });
+            }
           }
           setEditingTextId(null);
           setEditingText('');
@@ -543,7 +719,9 @@ function App() {
     } else if (drawingMode === 'eraser') {
       setIsDrawing(true);
       lastPoint.current = { x, y };
-      // Start eraser stroke - don't add to currentStroke since we don't save eraser strokes
+      // Start eraser stroke
+      const eraserWidth = getEraserSize();
+      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
     } else if (drawingMode === 'fill' && currentRoom) {
       // Fill clicked shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
@@ -603,6 +781,14 @@ function App() {
       setEditingTextId(shapeId);
       setEditingText('');
       
+      // Send the shape to server immediately so other clients can see it
+      sendMessage({
+        type: 'addShape',
+        roomId: currentRoom.roomId,
+        shapeId: shapeId,
+        shape: newShape
+      });
+      
       // Force redraw after a short delay to ensure state is updated
       setTimeout(() => {
         redrawCanvas();
@@ -620,8 +806,44 @@ function App() {
     if (!ctx) return;
     
     if (drawingMode === 'eraser') {
-      // Eraser mode: use destination-out to actually erase
+      // Eraser mode: check if erasing over any shapes and delete them
       const eraserWidth = getEraserSize();
+      const eraserRadius = eraserWidth / 2;
+      
+      // Check for shapes intersecting with the eraser path
+      const shapesToDelete: string[] = [];
+      shapes.forEach(shape => {
+        // Check multiple points along the eraser stroke
+        const steps = 5;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const checkX = lastPoint.current!.x + (x - lastPoint.current!.x) * t;
+          const checkY = lastPoint.current!.y + (y - lastPoint.current!.y) * t;
+          
+          // Check if this point of the eraser is touching the shape
+          if (isShapeTouchedByEraser(checkX, checkY, eraserRadius, shape)) {
+            if (!shapesToDelete.includes(shape.id)) {
+              shapesToDelete.push(shape.id);
+            }
+            break;
+          }
+        }
+      });
+      
+      // Delete shapes that were erased
+      if (shapesToDelete.length > 0) {
+        setShapes(prev => prev.filter(shape => !shapesToDelete.includes(shape.id)));
+        shapesToDelete.forEach(shapeId => {
+          sendMessage({
+            type: 'deleteShape',
+            roomId: currentRoom.roomId,
+            shapeId: shapeId
+          });
+        });
+        redrawCanvas();
+      }
+      
+      // Also erase pen strokes visually
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
       ctx.lineWidth = eraserWidth;
@@ -633,12 +855,15 @@ function App() {
       ctx.stroke();
       ctx.globalCompositeOperation = 'source-over'; // Reset to normal
       
-      // Don't store eraser strokes - just erase visually
-      // Send erase message to other users
+      // Send erase message to other users for pen strokes
       const points = [
         { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
         { x, y, color: 'eraser', size: eraserWidth },
       ];
+      
+      // Add points to current eraser stroke
+      setCurrentEraserStroke(prev => [...prev, ...points]);
+      
       sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     } else {
       // Normal pen mode
@@ -780,6 +1005,12 @@ function App() {
       setCurrentStroke([]);
     }
     
+    // Save current eraser stroke if erasing
+    if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
+      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setCurrentEraserStroke([]);
+    }
+    
     if (isDrawingShape && shapeStart && canvasRef.current && currentRoom) {
       const rect = canvasRef.current.getBoundingClientRect();
       const event = (window.event as MouseEvent);
@@ -843,9 +1074,14 @@ function App() {
       const y = touch.clientY - rect.top;
       setIsDrawing(true);
       lastPoint.current = { x, y };
-      // Start pen stroke only (eraser doesn't need currentStroke)
+      
+      // Start pen stroke
       if (drawingMode === 'pen') {
         setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+      } else if (drawingMode === 'eraser') {
+        // Start eraser stroke
+        const eraserWidth = getEraserSize();
+        setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
       }
     }
   };
@@ -864,8 +1100,44 @@ function App() {
     if (!ctx) return;
     
     if (drawingMode === 'eraser') {
-      // Eraser mode: use destination-out to actually erase
+      // Eraser mode: check if erasing over any shapes and delete them
       const eraserWidth = getEraserSize();
+      const eraserRadius = eraserWidth / 2;
+      
+      // Check for shapes intersecting with the eraser path
+      const shapesToDelete: string[] = [];
+      shapes.forEach(shape => {
+        // Check multiple points along the eraser stroke
+        const steps = 5;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const checkX = lastPoint.current!.x + (x - lastPoint.current!.x) * t;
+          const checkY = lastPoint.current!.y + (y - lastPoint.current!.y) * t;
+          
+          // Check if this point of the eraser is touching the shape
+          if (isShapeTouchedByEraser(checkX, checkY, eraserRadius, shape)) {
+            if (!shapesToDelete.includes(shape.id)) {
+              shapesToDelete.push(shape.id);
+            }
+            break;
+          }
+        }
+      });
+      
+      // Delete shapes that were erased
+      if (shapesToDelete.length > 0) {
+        setShapes(prev => prev.filter(shape => !shapesToDelete.includes(shape.id)));
+        shapesToDelete.forEach(shapeId => {
+          sendMessage({
+            type: 'deleteShape',
+            roomId: currentRoom.roomId,
+            shapeId: shapeId
+          });
+        });
+        redrawCanvas();
+      }
+      
+      // Also erase pen strokes visually
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
       ctx.lineWidth = eraserWidth;
@@ -881,6 +1153,10 @@ function App() {
         { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
         { x, y, color: 'eraser', size: eraserWidth },
       ];
+      
+      // Add points to current eraser stroke
+      setCurrentEraserStroke(prev => [...prev, ...points]);
+      
       sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
     } else {
       // Normal pen mode
@@ -910,6 +1186,19 @@ function App() {
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    
+    // Save current stroke if drawing with pen
+    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
+      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setCurrentStroke([]);
+    }
+    
+    // Save current eraser stroke if erasing
+    if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
+      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setCurrentEraserStroke([]);
+    }
+    
     setIsDrawing(false);
     lastPoint.current = null;
   };
