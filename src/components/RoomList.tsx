@@ -244,6 +244,7 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout, 
                   placeholder="Enter room password"
                   required
                   autoFocus
+                  autoComplete="off"
                 />
               </div>
               <div className="modal-actions">

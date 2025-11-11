@@ -594,6 +594,9 @@ function App() {
   // Handle keyboard events for delete and text editing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle keyboard events when in whiteboard view
+      if (view !== 'whiteboard') return;
+      
       // Handle text editing
       if (editingTextId) {
         e.preventDefault(); // Prevent default browser behavior while editing
@@ -666,7 +669,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedShapeId, currentRoom, redrawCanvas, editingTextId, editingText, shapes, updateTextShape]);
+  }, [selectedShapeId, currentRoom, redrawCanvas, editingTextId, editingText, shapes, updateTextShape, view]);
 
   const handleClearClick = () => {
     if (currentRoom) {
