@@ -9,7 +9,7 @@ export interface DrawPoint {
 
 export interface Shape {
   id: string;
-  type: 'rectangle' | 'circle' | 'line' | 'triangle' | 'text';
+  type: 'rectangle' | 'circle' | 'line' | 'triangle' | 'text' | 'image';
   x: number;
   y: number;
   width?: number;
@@ -23,6 +23,7 @@ export interface Shape {
   username: string;
   text?: string;
   fontSize?: number;
+  url?: string; // For image type
 }
 
 export interface BoardData {

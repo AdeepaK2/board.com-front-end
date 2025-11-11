@@ -51,6 +51,15 @@ interface WebSocketMessage {
   creator?: string;
   users?: string[];
   invitedUsers?: string[];
+  payload?: {
+    shapeType?: string;
+    url?: string;
+    room?: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  };
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -227,6 +236,49 @@ function App() {
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
   const [currentEraserStroke, setCurrentEraserStroke] = useState<DrawPoint[]>([]);
   
+  // Image cache for loaded images
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  
+  // Initialize image cache on window for shapeUtils access
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__imageCache = imageCache.current;
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__imageCache;
+    };
+  }, []);
+  
+  // Load images when shapes change
+  useEffect(() => {
+    const loadImages = () => {
+      shapes.forEach(shape => {
+        if (shape.type === 'image' && shape.url && !imageCache.current.has(shape.url)) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = shape.url;
+          img.onload = () => {
+            imageCache.current.set(shape.url!, img);
+            // Trigger canvas redraw by updating a dummy state or calling redraw directly
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                // Redraw will be triggered by the shapes useEffect
+                setShapes(prev => [...prev]); // Trigger re-render
+              }
+            }
+          };
+          img.onerror = () => {
+            console.error('Failed to load image:', shape.url);
+          };
+          imageCache.current.set(shape.url, img); // Store immediately to prevent duplicate loads
+        }
+      });
+    };
+    loadImages();
+  }, [shapes]);
+  
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
     const hostname = window.location.hostname;
@@ -398,6 +450,67 @@ function App() {
           });
         }
         break;
+      case 'shapeAdded':
+        // Handle image upload broadcast - specifically for IMAGE shapeType
+        if (message.payload && message.payload.shapeType === 'IMAGE' && message.payload.url) {
+          // Create image shape with dimensions from payload (backend provides actual dimensions)
+          const imageShape: Shape = {
+            id: generateShapeId(),
+            type: 'image',
+            x: message.payload.x || 100,
+            y: message.payload.y || 100,
+            color: '#000000',
+            size: 1,
+            username: username || 'system',
+            url: message.payload.url,
+            width: message.payload.width || 200,
+            height: message.payload.height || 200,
+          };
+          
+          // Preload image into cache if not already loaded
+          if (!imageCache.current.has(message.payload.url)) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = message.payload.url;
+            img.onload = () => {
+              imageCache.current.set(message.payload.url, img);
+              // If dimensions weren't provided, update with actual image dimensions
+              if (!message.payload.width || !message.payload.height) {
+                setShapes(prev => prev.map(s => 
+                  s.id === imageShape.id 
+                    ? { ...s, width: img.width, height: img.height }
+                    : s
+                ));
+              }
+              redrawCanvas();
+            };
+            img.onerror = () => {
+              console.error('Failed to load image:', message.payload.url);
+            };
+            imageCache.current.set(message.payload.url, img);
+          }
+          
+          setShapes(prev => {
+            // Avoid duplicates - check if image with same URL already exists at this position
+            const exists = prev.some(s => 
+              s.type === 'image' && 
+              s.url === message.payload.url &&
+              Math.abs(s.x - imageShape.x) < 50 &&
+              Math.abs(s.y - imageShape.y) < 50
+            );
+            if (exists) return prev;
+            return [...prev, imageShape];
+          });
+          
+          redrawCanvas();
+          
+          // Show notification
+          setNotification({
+            message: '🖼️ Image added to whiteboard',
+            type: 'info'
+          });
+        }
+        break;
     }
   };
 
@@ -559,8 +672,21 @@ function App() {
     
     ctx.globalCompositeOperation = 'source-over'; // Reset
     
-    // Redraw all shapes
-    shapes.forEach(shape => {
+    // Redraw all shapes (draw images last so they appear on top)
+    const nonImageShapes = shapes.filter(s => s.type !== 'image');
+    const imageShapes = shapes.filter(s => s.type === 'image');
+    
+    // Draw non-image shapes first
+    nonImageShapes.forEach(shape => {
+      drawShape(ctx, shape);
+      if (shape.id === selectedShapeId) {
+        drawSelectionHighlight(ctx, shape);
+        drawResizeHandles(ctx, shape);
+      }
+    });
+    
+    // Draw image shapes on top
+    imageShapes.forEach(shape => {
       drawShape(ctx, shape);
       if (shape.id === selectedShapeId) {
         drawSelectionHighlight(ctx, shape);
@@ -742,8 +868,12 @@ function App() {
         redrawCanvas();
       }
     } else if (drawingMode === 'select') {
-      // Check if clicking on a shape
-      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      // Check if clicking on a shape (check images last so they're on top)
+      const nonImageShapes = shapes.filter(s => s.type !== 'image');
+      const imageShapes = shapes.filter(s => s.type === 'image');
+      const allShapes = [...nonImageShapes, ...imageShapes].reverse();
+      const clickedShape = allShapes.find(shape => isPointInShape(x, y, shape));
+      
       if (clickedShape) {
         setSelectedShapeId(clickedShape.id);
         // Check if clicking on a resize handle
@@ -751,7 +881,13 @@ function App() {
         if (handle) {
           setResizeHandle(handle);
         } else {
-          setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          // Calculate drag offset based on shape type
+          if (clickedShape.type === 'image' && clickedShape.width && clickedShape.height) {
+            // For images, use center point or top-left
+            setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          } else {
+            setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          }
         }
         setIsDrawing(true);
       } else {
@@ -919,7 +1055,7 @@ function App() {
         // Resize shape
         const updatedShape = { ...shape };
 
-        if (shape.type === 'rectangle' && shape.width && shape.height) {
+        if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
           if (resizeHandle.includes('t')) {
             const newHeight = (shape.y + shape.height) - y;
             if (newHeight > 5) {
@@ -1295,6 +1431,18 @@ function App() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onOpenBoardManager={() => setBoardManagerOpen(true)}
+        onImageUploadSuccess={() => {
+          setNotification({
+            message: '✅ Image uploaded successfully!',
+            type: 'success'
+          });
+        }}
+        onImageUploadError={(error) => {
+          setNotification({
+            message: `❌ Image upload failed: ${error}`,
+            type: 'error'
+          });
+        }}
       />
       <BoardManager
         isOpen={boardManagerOpen}

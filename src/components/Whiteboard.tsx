@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
+import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type, Image } from 'lucide-react';
 import './Whiteboard.css';
 import type { DrawingMode } from '../types';
+import { ImageUploadTool } from './ImageUploadTool';
 
 interface WhiteboardProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -28,6 +29,8 @@ interface WhiteboardProps {
   onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onOpenBoardManager: () => void;
+  onImageUploadSuccess?: () => void;
+  onImageUploadError?: (error: string) => void;
 }
 
 export const Whiteboard = ({
@@ -55,8 +58,11 @@ export const Whiteboard = ({
   onTouchMove,
   onTouchEnd,
   onOpenBoardManager,
+  onImageUploadSuccess,
+  onImageUploadError,
 }: WhiteboardProps) => {
   const [showShapesDropdown, setShowShapesDropdown] = useState(false);
+  const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
 
   const shapeTools = [
     { mode: 'rectangle' as DrawingMode, icon: Square, label: 'Rectangle' },
@@ -148,6 +154,13 @@ export const Whiteboard = ({
             title="Text Tool"
           >
             <Type size={18} />
+          </button>
+          <button 
+            className="tool-btn"
+            onClick={() => setIsImageUploadOpen(true)}
+            title="Upload Image"
+          >
+            <Image size={18} />
           </button>
         </div>
 
@@ -279,6 +292,15 @@ export const Whiteboard = ({
           💡 Draw with mouse or touch • Change colors and sizes • Real-time collaboration
         </span>
       </div>
+
+      {/* Image Upload Tool */}
+      <ImageUploadTool
+        isOpen={isImageUploadOpen}
+        onClose={() => setIsImageUploadOpen(false)}
+        roomName={roomName}
+        onUploadSuccess={onImageUploadSuccess}
+        onUploadError={onImageUploadError}
+      />
     </div>
   );
 };
