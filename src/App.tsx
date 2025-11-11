@@ -361,6 +361,8 @@ function App() {
         break;
       case 'clear':
         clearCanvas();
+        setShapes([]);
+        setSelectedShapeId(null);
         break;
       case 'error':
         if (message.message) {
