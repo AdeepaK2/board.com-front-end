@@ -1,3 +1,4 @@
+
 // Types for the Whiteboard application
 
 export interface DrawPoint {
@@ -34,7 +35,7 @@ export interface BoardData {
   strokes: { points: DrawPoint[] }[];
 }
 
-export type DrawingMode = 'pen' | 'eraser' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text';
+export type DrawingMode = 'pen' | 'eraser' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text' | 'sticky';
 
 export interface Room {
   roomId: string;

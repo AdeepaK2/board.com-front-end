@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import { LoginView } from './components/LoginView';
@@ -208,7 +209,7 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info'; duration?: number } | null>(null);
   const [activeUsers, setActiveUsers] = useState<string[]>([]);
   
   // Shape-related states
@@ -465,6 +466,42 @@ function App() {
     sendMessage({ type: 'getActiveUsers' });
   };
 
+  // Create and broadcast a sticky note (text box) centered on the canvas
+  const handleAddStickyNote = (color?: string) => {
+    if (!canvasRef.current || !currentRoom) return;
+    const canvas = canvasRef.current;
+    const noteWidth = 220;
+    const noteHeight = 140;
+    // Center on the canvas
+    const x = Math.max(10, Math.round((canvas.width - noteWidth) / 2));
+    const y = Math.max(10, Math.round((canvas.height - noteHeight) / 2));
+    const shapeId = generateShapeId();
+    const newShape: Shape = {
+      id: shapeId,
+      type: 'text',
+      x,
+      y,
+      width: noteWidth,
+      height: noteHeight,
+      color: '#000000',
+      size: 2,
+      fillColor: color || '#fff59d', // allow provided color
+      username: username,
+      text: '', // start empty so user can type immediately
+      fontSize: 16
+    };
+
+    // Add locally and broadcast to other clients
+    setShapes(prev => [...prev, newShape]);
+    // Open in edit mode immediately
+    setEditingTextId(shapeId);
+    setEditingText('');
+
+    sendMessage({ type: 'addShape', roomId: currentRoom.roomId, shapeId, shape: newShape });
+    // Redraw after state updates
+    setTimeout(() => redrawCanvas(), 0);
+  };
+
   const handleLogout = () => {
     if (currentRoom) {
       sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
@@ -596,11 +633,17 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle keyboard events when in whiteboard view
       if (view !== 'whiteboard') return;
-      
-      // Handle text editing
+      // If the user is focused on a form control (input/textarea/contentEditable),
+      // don't intercept keys here so normal typing works (e.g., filename input).
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+        return; // let the focused element handle the key event
+      }
+
+      // Handle text editing (only when focus is not in an input)
       if (editingTextId) {
         e.preventDefault(); // Prevent default browser behavior while editing
-        
+
         if (e.key === 'Escape') {
           // Cancel text editing - remove empty text or keep existing
           const shape = shapes.find(s => s.id === editingTextId);
@@ -744,14 +787,19 @@ function App() {
     } else if (drawingMode === 'select') {
       // Check if clicking on a shape
       const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      console.debug('select mode mousedown at', { x, y, found: !!clickedShape });
       if (clickedShape) {
+        console.debug('clicked shape', { id: clickedShape.id, type: clickedShape.type, x: clickedShape.x, y: clickedShape.y, width: clickedShape.width, height: clickedShape.height });
         setSelectedShapeId(clickedShape.id);
         // Check if clicking on a resize handle
         const handle = getResizeHandle(clickedShape, x, y);
         if (handle) {
+          console.debug('resize handle', handle);
           setResizeHandle(handle);
         } else {
-          setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          const offset = { x: x - clickedShape.x, y: y - clickedShape.y };
+          console.debug('set drag offset', offset);
+          setDragOffset(offset);
         }
         setIsDrawing(true);
       } else {
@@ -763,41 +811,50 @@ function App() {
       setShapeStart({ x, y });
     } else if (drawingMode === 'text' && currentRoom) {
       console.log('Text mode activated at:', x, y);
-      // Create text shape immediately and start editing
-      const shapeId = generateShapeId();
-      const newShape: Shape = {
-        id: shapeId,
-        type: 'text',
-        x,
-        y,
-        color: brushColor,
-        size: brushSize,
-        username: username,
-        text: '',
-        fontSize: 16
-      };
-      
-      console.log('Creating text shape:', newShape);
-      setShapes(prev => {
-        const updated = [...prev, newShape];
-        console.log('Updated shapes:', updated);
-        return updated;
-      });
-      setEditingTextId(shapeId);
-      setEditingText('');
-      
-      // Send the shape to server immediately so other clients can see it
-      sendMessage({
-        type: 'addShape',
-        roomId: currentRoom.roomId,
-        shapeId: shapeId,
-        shape: newShape
-      });
-      
-      // Force redraw after a short delay to ensure state is updated
-      setTimeout(() => {
+      // If clicking inside an existing sticky (text with width/height), open it for editing
+      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      if (clickedShape && clickedShape.type === 'text' && clickedShape.width && clickedShape.height) {
+        // Edit the existing sticky's text
+        setEditingTextId(clickedShape.id);
+        setEditingText(clickedShape.text || '');
+        // Ensure selection highlights the sticky
+        setSelectedShapeId(clickedShape.id);
         redrawCanvas();
-      }, 0);
+      } else {
+        // Create text shape immediately and start editing
+        const shapeId = generateShapeId();
+        const newShape: Shape = {
+          id: shapeId,
+          type: 'text',
+          x,
+          y,
+          color: brushColor,
+          size: brushSize,
+          username: username,
+          text: '',
+          fontSize: 16
+        };
+
+        setShapes(prev => {
+          const updated = [...prev, newShape];
+          return updated;
+        });
+        setEditingTextId(shapeId);
+        setEditingText('');
+
+        // Send the shape to server immediately so other clients can see it
+        sendMessage({
+          type: 'addShape',
+          roomId: currentRoom.roomId,
+          shapeId: shapeId,
+          shape: newShape
+        });
+
+        // Force redraw after a short delay to ensure state is updated
+        setTimeout(() => {
+          redrawCanvas();
+        }, 0);
+      }
     }
   };
 
@@ -971,19 +1028,33 @@ function App() {
         // Drag selected shape
         const newX = x - dragOffset.x;
         const newY = y - dragOffset.y;
-        
+        console.debug('dragging shape', { id: selectedShapeId, newX, newY });
+        // Update the entire shape object so text/content stays together with the sticky
         setShapes(prev => prev.map(s =>
           s.id === selectedShapeId
             ? { ...s, x: newX, y: newY }
             : s
         ));
-        
-        sendMessage({
-          type: 'updateShape',
-          roomId: currentRoom.roomId,
-          shapeId: selectedShapeId,
-          updates: { x: newX, y: newY }
-        });
+
+        // Find the updated shape to send the full object as updates (ensures text moves with sticky)
+        const updatedShape = shapes.find(s => s.id === selectedShapeId);
+        if (updatedShape) {
+          const full = { ...updatedShape, x: newX, y: newY };
+          sendMessage({
+            type: 'updateShape',
+            roomId: currentRoom.roomId,
+            shapeId: selectedShapeId,
+            updates: full
+          });
+        } else {
+          // fallback: send minimal update
+          sendMessage({
+            type: 'updateShape',
+            roomId: currentRoom.roomId,
+            shapeId: selectedShapeId,
+            updates: { x: newX, y: newY }
+          });
+        }
         
         redrawCanvas();
       }
@@ -1295,6 +1366,17 @@ function App() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onOpenBoardManager={() => setBoardManagerOpen(true)}
+        onNotify={(message, type, duration) => setNotification({ message, type, duration })}
+        onAddStickyNote={handleAddStickyNote}
+        shapes={shapes}
+        selectedShapeId={selectedShapeId}
+        onDeleteShape={(shapeId: string) => {
+          if (!currentRoom) return;
+          setShapes(prev => prev.filter(s => s.id !== shapeId));
+          sendMessage({ type: 'deleteShape', roomId: currentRoom.roomId, shapeId });
+          setSelectedShapeId(null);
+          redrawCanvas();
+        }}
       />
       <BoardManager
         isOpen={boardManagerOpen}
