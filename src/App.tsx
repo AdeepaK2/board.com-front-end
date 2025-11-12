@@ -7,6 +7,8 @@ import { BoardManager } from './components/BoardManager';
 import Notification from './components/Notification';
 import type { DrawingMode, Shape } from './types';
 import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
+import Chat from './components/Chat';
+
 
 interface DrawPoint {
   x: number;
@@ -261,10 +263,28 @@ function App() {
 
   const connectWebSocket = () => {
     const ws = new WebSocket(serverUrl || 'ws://localhost:8080');
-    wsRef.current = ws;
-    ws.onopen = () => setConnectionStatus('Connected');
-    ws.onclose = () => setConnectionStatus('Disconnected');
-    ws.onerror = () => setConnectionStatus('Connection Error');
+    
+    ws.onopen = () => {
+      console.log('✅ Main App: WebSocket Connected');
+      setConnectionStatus('Connected');
+    };
+    
+    ws.onclose = () => {
+      console.log('❌ Main App: WebSocket Disconnected');
+      setConnectionStatus('Disconnected');
+      
+      // Attempt to reconnect after 5 seconds
+      setTimeout(() => {
+        console.log('🔄 Main App: Attempting to reconnect...');
+        connectWebSocket();
+      }, 5000);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('❌ Main App: WebSocket Error:', error);
+      setConnectionStatus('Connection Error');
+    };
+    
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
@@ -273,14 +293,21 @@ function App() {
         console.error('Error parsing message:', error);
       }
     };
+    
+    wsRef.current = ws;
   };
 
   useEffect(() => {
     if (serverUrl) {
+      console.log('🔗 Connecting to WebSocket server:', serverUrl);
       connectWebSocket();
-      return () => wsRef.current?.close();
+      
+      return () => {
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+      };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverUrl]);
 
   const handleWebSocketMessage = (message: WebSocketMessage) => {
@@ -344,6 +371,10 @@ function App() {
           setShapes(prev => prev.filter(shape => shape.id !== message.shapeId));
           redrawCanvas();
         }
+        break;
+      case 'chatMessage':
+        // Chat message - will be handled by Chat component's WebSocket listener
+        console.log('📨 Chat message received from server:', message);
         break;
       case 'cursor':
         if (message.username && message.username !== username && message.x !== undefined && message.y !== undefined) {
@@ -1304,6 +1335,11 @@ function App() {
         onLoadBoard={handleLoadBoard}
         shapes={shapes}
         strokes={strokes}
+      />
+      <Chat 
+        ws={wsRef.current} 
+        roomId={currentRoom?.roomId || ''} 
+        username={username} 
       />
       {notification && (
         <Notification
