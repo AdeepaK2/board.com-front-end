@@ -175,6 +175,31 @@
   background: #0256c7;
 }
 
+.room-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-direction: column;
+}
+
+.btn-delete-room {
+  width: 100%;
+  padding: 0.5rem;
+  background: #fafbfc;
+  color: #d73a49;
+  border: 1px solid #d1d5da;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 0.875rem;
+}
+
+.btn-delete-room:hover {
+  background: #d73a49;
+  color: white;
+  border-color: #d73a49;
+}
+
 .empty-state {
   grid-column: 1 / -1;
   text-align: center;
