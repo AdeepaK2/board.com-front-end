@@ -67,16 +67,40 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
       ctx.font = `${fontSize}px Arial`;
       ctx.fillStyle = shape.color;
       ctx.textBaseline = 'top';
-      
-      if (shape.text) {
-        // Draw text only
-        ctx.fillText(shape.text, shape.x, shape.y);
-      } else {
-        // Show cursor for empty text being edited
+
+      // If this text shape has width/height and a fillColor, draw a sticky-note style box
+      if (shape.fillColor && shape.width && shape.height) {
+        ctx.beginPath();
+        ctx.fillStyle = shape.fillColor;
+        ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+        // Use a dashed black border for sticky notes
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = Math.max(1, shape.size || 1);
+        ctx.setLineDash([6, 3]);
+        ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+        ctx.setLineDash([]); // reset dash
+
+        // Draw text inside with padding and proper wrapping
         ctx.fillStyle = shape.color;
-        const cursorHeight = fontSize;
-        const cursorWidth = 2;
-        ctx.fillRect(shape.x, shape.y, cursorWidth, cursorHeight);
+        const padding = 8;
+        if (shape.text) {
+          const maxTextWidth = shape.width - padding * 2;
+          const lines = wrapText(ctx, shape.text, maxTextWidth);
+          for (let i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], shape.x + padding, shape.y + padding + i * (fontSize + 4));
+          }
+        }
+      } else {
+        if (shape.text) {
+          // Draw text only
+          ctx.fillText(shape.text, shape.x, shape.y);
+        } else {
+          // Show cursor for empty text being edited
+          ctx.fillStyle = shape.color;
+          const cursorHeight = fontSize;
+          const cursorWidth = 2;
+          ctx.fillRect(shape.x, shape.y, cursorWidth, cursorHeight);
+        }
       }
       break;
     }
@@ -116,6 +140,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
 }
 
 /**
+<<<<<<< HEAD
  * Draw placeholder for image while loading
  */
 function drawImagePlaceholder(ctx: CanvasRenderingContext2D, shape: Shape) {
@@ -134,6 +159,48 @@ function drawImagePlaceholder(ctx: CanvasRenderingContext2D, shape: Shape) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('Loading...', shape.x + shape.width / 2, shape.y + shape.height / 2);
+=======
+ * Wrap text into lines that fit within maxWidth using the provided canvas context.
+ * Returns an array of lines.
+ */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const test = current ? current + ' ' + word : word;
+    const metrics = ctx.measureText(test);
+    if (metrics.width <= maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      // If single word longer than maxWidth, break the word by characters
+      if (ctx.measureText(word).width > maxWidth) {
+        let partial = '';
+        for (let j = 0; j < word.length; j++) {
+          const testPart = partial + word[j];
+          if (ctx.measureText(testPart).width <= maxWidth) {
+            partial = testPart;
+          } else {
+            if (partial) lines.push(partial);
+            partial = word[j];
+          }
+        }
+        if (partial) {
+          current = partial;
+        } else {
+          current = '';
+        }
+      } else {
+        current = word;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+>>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 }
 
 /**
@@ -238,6 +305,16 @@ export function isPointInShape(x: number, y: number, shape: Shape): boolean {
       break;
 
     case 'text':
+      // If this is a sticky-style text with explicit width/height, treat it like a rectangle
+      if (shape.width !== undefined && shape.height !== undefined) {
+        return (
+          x >= shape.x &&
+          x <= shape.x + shape.width &&
+          y >= shape.y &&
+          y <= shape.y + shape.height
+        );
+      }
+
       if (shape.text) {
         // Create a temporary canvas to measure text
         const canvas = document.createElement('canvas');
@@ -295,7 +372,7 @@ function distanceToLine(
 
   if (lenSq !== 0) param = dot / lenSq;
 
-  let xx, yy;
+  let xx: number, yy: number;
 
   if (param < 0) {
     xx = x1;
@@ -381,6 +458,12 @@ export function drawSelectionHighlight(ctx: CanvasRenderingContext2D, shape: Sha
         ctx.stroke();
       }
       break;
+
+    case 'text':
+      if (shape.width && shape.height) {
+        ctx.strokeRect(shape.x - 5, shape.y - 5, shape.width + 10, shape.height + 10);
+      }
+      break;
   }
 
   ctx.restore();
@@ -400,7 +483,7 @@ export function drawResizeHandles(ctx: CanvasRenderingContext2D, shape: Shape): 
   const handleSize = 8;
   const handles: {x: number, y: number}[] = [];
 
-  if (shape.type === 'rectangle' && shape.width && shape.height) {
+  if ((shape.type === 'rectangle' || shape.type === 'text') && shape.width && shape.height) {
     handles.push(
       {x: shape.x, y: shape.y},
       {x: shape.x + shape.width, y: shape.y},
@@ -462,7 +545,11 @@ export function getResizeHandle(shape: Shape, x: number, y: number): string | nu
   const handleSize = 8;
   const tolerance = handleSize / 2;
 
+<<<<<<< HEAD
   if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
+=======
+  if ((shape.type === 'rectangle' || shape.type === 'text') && shape.width && shape.height) {
+>>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
     const handles = [
       {key: 'tl', x: shape.x, y: shape.y},
       {key: 'tr', x: shape.x + shape.width, y: shape.y},
