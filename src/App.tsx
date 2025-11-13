@@ -224,8 +224,7 @@ function App() {
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
-  const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
-  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>([]);
+  const [strokes, setStrokes] = useState<{ points: DrawPoint[], isEraser: boolean }[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
@@ -363,16 +362,9 @@ function App() {
           // Check if this is an eraser stroke or pen stroke
           const isEraserStroke = message.points.length > 0 && message.points[0].color === 'eraser';
           
-          if (isEraserStroke) {
-            // Store incoming eraser stroke - always append to create continuous eraser path
-            if (message.points) {
-              setEraserStrokes(prev => [...prev, { points: message.points! }]);
-            }
-          } else {
-            // Store incoming pen stroke - always append to create continuous pen path
-            if (message.points) {
-              setStrokes(prev => [...prev, { points: message.points! }]);
-            }
+          // Store incoming stroke with eraser flag - maintains chronological order
+          if (message.points) {
+            setStrokes(prev => [...prev, { points: message.points!, isEraser: isEraserStroke }]);
           }
         }
         break;
@@ -659,9 +651,8 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
-    // Clear strokes and eraser strokes
+    // Clear all strokes (both pen and eraser)
     setStrokes([]);
-    setEraserStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -673,35 +664,26 @@ function App() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Redraw all strokes (pencil drawings)
+    // Redraw all strokes in chronological order (pen and eraser mixed)
     strokes.forEach(stroke => {
       if (stroke.points.length < 2) return;
+      
       for (let i = 0; i < stroke.points.length - 1; i++) {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
         
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = start.color;
-        ctx.lineWidth = start.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      }
-    });
-    
-    // Apply eraser strokes
-    eraserStrokes.forEach(stroke => {
-      if (stroke.points.length < 2) return;
-      for (let i = 0; i < stroke.points.length - 1; i++) {
-        const start = stroke.points[i];
-        const end = stroke.points[i + 1];
+        if (stroke.isEraser) {
+          // Eraser stroke - removes content
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+          ctx.lineWidth = start.size;
+        } else {
+          // Pen stroke - adds content
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = start.color;
+          ctx.lineWidth = start.size;
+        }
         
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
-        ctx.lineWidth = start.size;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
@@ -734,7 +716,7 @@ function App() {
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, strokes, eraserStrokes, selectedShapeId]);
+  }, [shapes, strokes, selectedShapeId]);
 
   // Auto-redraw when shapes or strokes change
   useEffect(() => {
@@ -1224,13 +1206,13 @@ function App() {
   const stopDrawing = () => {
     // Save current stroke if drawing with pen
     if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setStrokes(prev => [...prev, { points: currentStroke, isEraser: false }]);
       setCurrentStroke([]);
     }
     
     // Save current eraser stroke if erasing
     if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setStrokes(prev => [...prev, { points: currentEraserStroke, isEraser: true }]);
       setCurrentEraserStroke([]);
     }
     
@@ -1422,13 +1404,13 @@ function App() {
     
     // Save current stroke if drawing with pen
     if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setStrokes(prev => [...prev, { points: currentStroke, isEraser: false }]);
       setCurrentStroke([]);
     }
     
     // Save current eraser stroke if erasing
     if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setStrokes(prev => [...prev, { points: currentEraserStroke, isEraser: true }]);
       setCurrentEraserStroke([]);
     }
     
