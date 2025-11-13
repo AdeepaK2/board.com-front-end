@@ -8,6 +8,7 @@ interface Room {
   isPublic: boolean;
   participants: number;
   hasPassword: boolean;
+  creatorUsername?: string;
 }
 
 interface RoomListProps {
@@ -15,12 +16,13 @@ interface RoomListProps {
   username: string;
   onCreateRoom: (roomName: string, isPublic: boolean, password?: string, invitedUsers?: string[]) => void;
   onJoinRoom: (roomId: string, password?: string) => void;
+  onDeleteRoom: (roomId: string) => void;
   onLogout: () => void;
   activeUsers: string[];
   onRequestActiveUsers: () => void;
 }
 
-export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout, activeUsers, onRequestActiveUsers }: RoomListProps) => {
+export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onDeleteRoom, onLogout, activeUsers, onRequestActiveUsers }: RoomListProps) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState('');
@@ -77,6 +79,13 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout, 
     }
   };
 
+  const handleDeleteRoom = (room: Room, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering join action
+    if (confirm(`Delete room "${room.roomName}"? This will kick out all participants and cannot be undone.`)) {
+      onDeleteRoom(room.roomId);
+    }
+  };
+
   return (
     <div className="room-list-view">
       <div className="room-list-container">
@@ -124,9 +133,20 @@ export const RoomList = ({ rooms, username, onCreateRoom, onJoinRoom, onLogout, 
                     {room.isPublic ? 'Public' : 'Private'}
                   </span>
                 </div>
-                <button onClick={() => handleJoinClick(room)} className="btn-join">
-                  Join Room
-                </button>
+                <div className="room-actions">
+                  <button onClick={() => handleJoinClick(room)} className="btn-join">
+                    Join Room
+                  </button>
+                  {room.creatorUsername === username && (
+                    <button 
+                      onClick={(e) => handleDeleteRoom(room, e)} 
+                      className="btn-delete-room"
+                      title="Delete room (creator only)"
+                    >
+                      🗑️ Delete
+                    </button>
+                  )}
+                </div>
               </div>
             ))
           )}

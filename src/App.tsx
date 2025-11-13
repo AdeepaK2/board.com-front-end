@@ -29,6 +29,7 @@ interface Room {
   isPublic: boolean;
   participants: number;
   hasPassword: boolean;
+  creatorUsername?: string;
 }
 
 interface UserCursor {
@@ -530,6 +531,26 @@ function App() {
           });
         }
         break;
+      case "roomDeleted":
+        // Room was deleted by creator
+        if (message.message) {
+          setNotification({
+            message: `🗑️ ${message.message}`,
+            type: "info",
+          });
+          // Return to room list if we're in this room
+          if (currentRoom && currentRoom.roomId === message.roomId) {
+            setView("roomList");
+            setCurrentRoom(null);
+          }
+        }
+        break;
+      case "roomDeleteSuccess":
+        setNotification({
+          message: "✅ Room deleted successfully",
+          type: "success",
+        });
+        break;
       case "shapeAdded":
         // Handle image upload broadcast - specifically for IMAGE shapeType
         if (
@@ -761,6 +782,10 @@ function App() {
       setView("roomList");
       setUserCursors(new Map());
     }
+  };
+
+  const handleDeleteRoom = (roomId: string) => {
+    sendMessage({ type: "deleteRoom", roomId });
   };
 
   const clearCanvas = () => {
@@ -1783,6 +1808,7 @@ function App() {
           username={username}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onDeleteRoom={handleDeleteRoom}
           onLogout={handleLogout}
           activeUsers={activeUsers}
           onRequestActiveUsers={requestActiveUsers}
