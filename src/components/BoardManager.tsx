@@ -132,27 +132,33 @@ export const BoardManager = ({
     }
   };
 
-  const handleDeleteBoard = async (boardId: string, boardName: string) => {
+  const handleDeleteBoard = async (boardId: string, boardName: string, savedBy: string) => {
+    // Check if current user is the creator
+    if (savedBy !== username) {
+      setMessage(`❌ Only the creator (${savedBy}) can delete this board`);
+      return;
+    }
+    
     if (!confirm(`Delete board "${boardName}"? This cannot be undone.`)) {
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/delete/${boardId}`, {
+      const response = await fetch(`${API_URL}/delete/${boardId}?username=${encodeURIComponent(username)}`, {
         method: "DELETE",
       });
 
       const data = await response.json();
       if (data.success) {
-        setMessage("Board deleted successfully");
+        setMessage("✅ Board deleted successfully");
         loadBoardsList();
       } else {
-        setMessage(data.error || "Failed to delete board");
+        setMessage(`❌ ${data.error || "Failed to delete board"}`);
       }
     } catch (error) {
       console.error("Delete error:", error);
-      setMessage("Failed to delete board");
+      setMessage("❌ Failed to delete board");
     } finally {
       setLoading(false);
     }
@@ -352,10 +358,11 @@ export const BoardManager = ({
                         </button>
                         <button
                           onClick={() =>
-                            handleDeleteBoard(board.boardId, board.boardName)
+                            handleDeleteBoard(board.boardId, board.boardName, board.savedBy)
                           }
-                          className="btn-delete"
-                          title="Delete"
+                          className={`btn-delete ${board.savedBy !== username ? 'disabled' : ''}`}
+                          title={board.savedBy === username ? "Delete" : `Only ${board.savedBy} can delete this`}
+                          disabled={board.savedBy !== username}
                         >
                           <Trash2 size={18} />
                         </button>
