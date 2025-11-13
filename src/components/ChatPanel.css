@@ -1,3 +1,51 @@
+/* Chat toggle button (floating) */
+.chat-toggle-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 60px;
+  height: 60px;
+  background: #333;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  transition: all 0.3s ease;
+}
+
+.chat-toggle-btn:hover {
+  background: #555;
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.chat-toggle-btn:active {
+  transform: scale(0.95);
+}
+
+.chat-unread-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #ff4444;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
 .chat-panel {
   position: fixed;
   right: 20px;
@@ -243,14 +291,45 @@
 
 /* Responsive design */
 @media (max-width: 768px) {
-  .chat-panel {
-    width: calc(100% - 40px);
-    height: 450px;
-    right: 20px;
-    bottom: 20px;
+  .chat-toggle-btn {
+    width: 56px;
+    height: 56px;
+    right: 16px;
+    bottom: 16px;
   }
-  
-  .chat-panel-minimized {
-    width: 180px;
+
+  .chat-panel {
+    width: calc(100% - 32px);
+    max-width: 400px;
+    height: 70vh;
+    max-height: 500px;
+    right: 16px;
+    bottom: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-toggle-btn {
+    width: 52px;
+    height: 52px;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .chat-panel {
+    width: calc(100% - 24px);
+    height: 60vh;
+    max-height: 450px;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .chat-message {
+    max-width: 85%;
+  }
+
+  .chat-message-content {
+    font-size: 13px;
+    padding: 8px 12px;
   }
 }

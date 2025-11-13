@@ -12,7 +12,8 @@ interface ChatPanelProps {
 export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisible = true }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -40,6 +41,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisibl
             timestamp: data.timestamp
           };
           setMessages(prev => [...prev, chatMessage]);
+          
+          // Increment unread count if chat is closed
+          if (!isOpen) {
+            setUnreadCount(prev => prev + 1);
+          }
         } else if (data.type === 'chatHistory') {
           setMessages(data.messages || []);
         }
@@ -53,7 +59,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisibl
     return () => {
       socket.removeEventListener('message', handleMessage);
     };
-  }, [socket]);
+  }, [socket, isOpen]);
 
   // Request chat history when component mounts
   useEffect(() => {
@@ -113,8 +119,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisibl
 
   if (!isVisible) return null;
 
+  // Show as floating button when closed
+  if (!isOpen) {
+    return (
+      <button
+        className="chat-toggle-btn"
+        onClick={() => {
+          setIsOpen(true);
+          setUnreadCount(0);
+        }}
+        title="Open Chat"
+      >
+        <MessageCircle size={24} />
+        {unreadCount > 0 && (
+          <span className="chat-unread-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>
+        )}
+      </button>
+    );
+  }
+
   return (
-    <div className={`chat-panel ${isMinimized ? 'chat-panel-minimized' : ''}`}>
+    <div className="chat-panel">
       <div className="chat-header">
         <div className="chat-header-title">
           <MessageCircle size={18} />
@@ -123,17 +148,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisibl
         <div className="chat-header-actions">
           <button 
             className="chat-header-btn"
-            onClick={() => setIsMinimized(!isMinimized)}
-            title={isMinimized ? 'Expand' : 'Minimize'}
+            onClick={() => setIsOpen(false)}
+            title="Close"
           >
-            {isMinimized ? <MessageCircle size={16} /> : <Minimize2 size={16} />}
+            <Minimize2 size={16} />
           </button>
         </div>
       </div>
 
-      {!isMinimized && (
-        <>
-          <div className="chat-messages">
+      <>
+        <div className="chat-messages">
             {messages.length === 0 ? (
               <div className="chat-empty-state">
                 <MessageCircle size={48} opacity={0.3} />
@@ -163,7 +187,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ socket, username, isVisibl
             </button>
           </form>
         </>
-      )}
     </div>
   );
 };
