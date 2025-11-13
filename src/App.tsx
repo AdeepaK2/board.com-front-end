@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import { LoginView } from './components/LoginView';
@@ -53,6 +54,15 @@ interface WebSocketMessage {
   creator?: string;
   users?: string[];
   invitedUsers?: string[];
+  payload?: {
+    shapeType?: string;
+    url?: string;
+    room?: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  };
 }
 
 type AppView = 'login' | 'roomList' | 'whiteboard';
@@ -210,14 +220,13 @@ function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
   const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info'; duration?: number } | null>(null);
   const [activeUsers, setActiveUsers] = useState<string[]>([]);
   
   // Shape-related states
   const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
   const [shapes, setShapes] = useState<Shape[]>([]);
-  const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
-  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>([]);
+  const [strokes, setStrokes] = useState<{ points: DrawPoint[], isEraser: boolean }[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
   const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
@@ -228,6 +237,49 @@ function App() {
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
   const [currentEraserStroke, setCurrentEraserStroke] = useState<DrawPoint[]>([]);
+  
+  // Image cache for loaded images
+  const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+  
+  // Initialize image cache on window for shapeUtils access
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__imageCache = imageCache.current;
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__imageCache;
+    };
+  }, []);
+  
+  // Load images when shapes change
+  useEffect(() => {
+    const loadImages = () => {
+      shapes.forEach(shape => {
+        if (shape.type === 'image' && shape.url && !imageCache.current.has(shape.url)) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = shape.url;
+          img.onload = () => {
+            imageCache.current.set(shape.url!, img);
+            // Trigger canvas redraw by updating a dummy state or calling redraw directly
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                // Redraw will be triggered by the shapes useEffect
+                setShapes(prev => [...prev]); // Trigger re-render
+              }
+            }
+          };
+          img.onerror = () => {
+            console.error('Failed to load image:', shape.url);
+          };
+          imageCache.current.set(shape.url, img); // Store immediately to prevent duplicate loads
+        }
+      });
+    };
+    loadImages();
+  }, [shapes]);
   
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
@@ -337,16 +389,9 @@ function App() {
           // Check if this is an eraser stroke or pen stroke
           const isEraserStroke = message.points.length > 0 && message.points[0].color === 'eraser';
           
-          if (isEraserStroke) {
-            // Store incoming eraser stroke - always append to create continuous eraser path
-            if (message.points) {
-              setEraserStrokes(prev => [...prev, { points: message.points! }]);
-            }
-          } else {
-            // Store incoming pen stroke - always append to create continuous pen path
-            if (message.points) {
-              setStrokes(prev => [...prev, { points: message.points! }]);
-            }
+          // Store incoming stroke with eraser flag - maintains chronological order
+          if (message.points) {
+            setStrokes(prev => [...prev, { points: message.points!, isEraser: isEraserStroke }]);
           }
         }
         break;
@@ -429,6 +474,71 @@ function App() {
           });
         }
         break;
+      case 'shapeAdded':
+        // Handle image upload broadcast - specifically for IMAGE shapeType
+        if (message.payload && message.payload.shapeType === 'IMAGE' && message.payload.url) {
+          const imageUrl = message.payload.url; // Store in const to avoid undefined issues
+          const imageWidth = message.payload.width;
+          const imageHeight = message.payload.height;
+          
+          // Create image shape with dimensions from payload (backend provides actual dimensions)
+          const imageShape: Shape = {
+            id: generateShapeId(),
+            type: 'image',
+            x: message.payload.x || 100,
+            y: message.payload.y || 100,
+            color: '#000000',
+            size: 1,
+            username: username || 'system',
+            url: imageUrl,
+            width: imageWidth || 200,
+            height: imageHeight || 200,
+          };
+          
+          // Preload image into cache if not already loaded
+          if (!imageCache.current.has(imageUrl)) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = imageUrl;
+            img.onload = () => {
+              imageCache.current.set(imageUrl, img);
+              // If dimensions weren't provided, update with actual image dimensions
+              if (!imageWidth || !imageHeight) {
+                setShapes(prev => prev.map(s => 
+                  s.id === imageShape.id 
+                    ? { ...s, width: img.width, height: img.height }
+                    : s
+                ));
+              }
+              redrawCanvas();
+            };
+            img.onerror = () => {
+              console.error('Failed to load image:', imageUrl);
+            };
+            imageCache.current.set(imageUrl, img);
+          }
+          
+          setShapes(prev => {
+            // Avoid duplicates - check if image with same URL already exists at this position
+            const exists = prev.some(s => 
+              s.type === 'image' && 
+              s.url === imageUrl &&
+              Math.abs(s.x - imageShape.x) < 50 &&
+              Math.abs(s.y - imageShape.y) < 50
+            );
+            if (exists) return prev;
+            return [...prev, imageShape];
+          });
+          
+          redrawCanvas();
+          
+          // Show notification
+          setNotification({
+            message: '🖼️ Image added to whiteboard',
+            type: 'info'
+          });
+        }
+        break;
     }
   };
 
@@ -496,6 +606,42 @@ function App() {
     sendMessage({ type: 'getActiveUsers' });
   };
 
+  // Create and broadcast a sticky note (text box) centered on the canvas
+  const handleAddStickyNote = (color?: string) => {
+    if (!canvasRef.current || !currentRoom) return;
+    const canvas = canvasRef.current;
+    const noteWidth = 220;
+    const noteHeight = 140;
+    // Center on the canvas
+    const x = Math.max(10, Math.round((canvas.width - noteWidth) / 2));
+    const y = Math.max(10, Math.round((canvas.height - noteHeight) / 2));
+    const shapeId = generateShapeId();
+    const newShape: Shape = {
+      id: shapeId,
+      type: 'text',
+      x,
+      y,
+      width: noteWidth,
+      height: noteHeight,
+      color: '#000000',
+      size: 2,
+      fillColor: color || '#fff59d', // allow provided color
+      username: username,
+      text: '', // start empty so user can type immediately
+      fontSize: 16
+    };
+
+    // Add locally and broadcast to other clients
+    setShapes(prev => [...prev, newShape]);
+    // Open in edit mode immediately
+    setEditingTextId(shapeId);
+    setEditingText('');
+
+    sendMessage({ type: 'addShape', roomId: currentRoom.roomId, shapeId, shape: newShape });
+    // Redraw after state updates
+    setTimeout(() => redrawCanvas(), 0);
+  };
+
   const handleLogout = () => {
     if (currentRoom) {
       sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
@@ -536,9 +682,8 @@ function App() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     }
-    // Clear strokes and eraser strokes
+    // Clear all strokes (both pen and eraser)
     setStrokes([]);
-    setEraserStrokes([]);
   };
 
   const redrawCanvas = useCallback(() => {
@@ -550,35 +695,26 @@ function App() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Redraw all strokes (pencil drawings)
+    // Redraw all strokes in chronological order (pen and eraser mixed)
     strokes.forEach(stroke => {
       if (stroke.points.length < 2) return;
+      
       for (let i = 0; i < stroke.points.length - 1; i++) {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
         
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = start.color;
-        ctx.lineWidth = start.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      }
-    });
-    
-    // Apply eraser strokes
-    eraserStrokes.forEach(stroke => {
-      if (stroke.points.length < 2) return;
-      for (let i = 0; i < stroke.points.length - 1; i++) {
-        const start = stroke.points[i];
-        const end = stroke.points[i + 1];
+        if (stroke.isEraser) {
+          // Eraser stroke - removes content
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+          ctx.lineWidth = start.size;
+        } else {
+          // Pen stroke - adds content
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = start.color;
+          ctx.lineWidth = start.size;
+        }
         
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
-        ctx.lineWidth = start.size;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
@@ -590,15 +726,28 @@ function App() {
     
     ctx.globalCompositeOperation = 'source-over'; // Reset
     
-    // Redraw all shapes
-    shapes.forEach(shape => {
+    // Redraw all shapes (draw images last so they appear on top)
+    const nonImageShapes = shapes.filter(s => s.type !== 'image');
+    const imageShapes = shapes.filter(s => s.type === 'image');
+    
+    // Draw non-image shapes first
+    nonImageShapes.forEach(shape => {
       drawShape(ctx, shape);
       if (shape.id === selectedShapeId) {
         drawSelectionHighlight(ctx, shape);
         drawResizeHandles(ctx, shape);
       }
     });
-  }, [shapes, strokes, eraserStrokes, selectedShapeId]);
+    
+    // Draw image shapes on top
+    imageShapes.forEach(shape => {
+      drawShape(ctx, shape);
+      if (shape.id === selectedShapeId) {
+        drawSelectionHighlight(ctx, shape);
+        drawResizeHandles(ctx, shape);
+      }
+    });
+  }, [shapes, strokes, selectedShapeId]);
 
   // Auto-redraw when shapes or strokes change
   useEffect(() => {
@@ -627,11 +776,17 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle keyboard events when in whiteboard view
       if (view !== 'whiteboard') return;
-      
-      // Handle text editing
+      // If the user is focused on a form control (input/textarea/contentEditable),
+      // don't intercept keys here so normal typing works (e.g., filename input).
+      const active = document.activeElement as HTMLElement | null;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+        return; // let the focused element handle the key event
+      }
+
+      // Handle text editing (only when focus is not in an input)
       if (editingTextId) {
         e.preventDefault(); // Prevent default browser behavior while editing
-        
+
         if (e.key === 'Escape') {
           // Cancel text editing - remove empty text or keep existing
           const shape = shapes.find(s => s.id === editingTextId);
@@ -741,11 +896,15 @@ function App() {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !currentRoom) return;
+    const rect = canvas.getBoundingClientRect();
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Get canvas coordinates accounting for scroll and CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     if (drawingMode === 'pen') {
       setIsDrawing(true);
@@ -773,8 +932,12 @@ function App() {
         redrawCanvas();
       }
     } else if (drawingMode === 'select') {
-      // Check if clicking on a shape
-      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      // Check if clicking on a shape (check images last so they're on top)
+      const nonImageShapes = shapes.filter(s => s.type !== 'image');
+      const imageShapes = shapes.filter(s => s.type === 'image');
+      const allShapes = [...nonImageShapes, ...imageShapes].reverse();
+      const clickedShape = allShapes.find(shape => isPointInShape(x, y, shape));
+      
       if (clickedShape) {
         setSelectedShapeId(clickedShape.id);
         // Check if clicking on a resize handle
@@ -782,7 +945,13 @@ function App() {
         if (handle) {
           setResizeHandle(handle);
         } else {
-          setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          // Calculate drag offset based on shape type
+          if (clickedShape.type === 'image' && clickedShape.width && clickedShape.height) {
+            // For images, use center point or top-left
+            setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          } else {
+            setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
+          }
         }
         setIsDrawing(true);
       } else {
@@ -794,41 +963,50 @@ function App() {
       setShapeStart({ x, y });
     } else if (drawingMode === 'text' && currentRoom) {
       console.log('Text mode activated at:', x, y);
-      // Create text shape immediately and start editing
-      const shapeId = generateShapeId();
-      const newShape: Shape = {
-        id: shapeId,
-        type: 'text',
-        x,
-        y,
-        color: brushColor,
-        size: brushSize,
-        username: username,
-        text: '',
-        fontSize: 16
-      };
-      
-      console.log('Creating text shape:', newShape);
-      setShapes(prev => {
-        const updated = [...prev, newShape];
-        console.log('Updated shapes:', updated);
-        return updated;
-      });
-      setEditingTextId(shapeId);
-      setEditingText('');
-      
-      // Send the shape to server immediately so other clients can see it
-      sendMessage({
-        type: 'addShape',
-        roomId: currentRoom.roomId,
-        shapeId: shapeId,
-        shape: newShape
-      });
-      
-      // Force redraw after a short delay to ensure state is updated
-      setTimeout(() => {
+      // If clicking inside an existing sticky (text with width/height), open it for editing
+      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      if (clickedShape && clickedShape.type === 'text' && clickedShape.width && clickedShape.height) {
+        // Edit the existing sticky's text
+        setEditingTextId(clickedShape.id);
+        setEditingText(clickedShape.text || '');
+        // Ensure selection highlights the sticky
+        setSelectedShapeId(clickedShape.id);
         redrawCanvas();
-      }, 0);
+      } else {
+        // Create text shape immediately and start editing
+        const shapeId = generateShapeId();
+        const newShape: Shape = {
+          id: shapeId,
+          type: 'text',
+          x,
+          y,
+          color: brushColor,
+          size: brushSize,
+          username: username,
+          text: '',
+          fontSize: 16
+        };
+
+        setShapes(prev => {
+          const updated = [...prev, newShape];
+          return updated;
+        });
+        setEditingTextId(shapeId);
+        setEditingText('');
+
+        // Send the shape to server immediately so other clients can see it
+        sendMessage({
+          type: 'addShape',
+          roomId: currentRoom.roomId,
+          shapeId: shapeId,
+          shape: newShape
+        });
+
+        // Force redraw after a short delay to ensure state is updated
+        setTimeout(() => {
+          redrawCanvas();
+        }, 0);
+      }
     }
   };
 
@@ -836,8 +1014,13 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
@@ -927,15 +1110,18 @@ function App() {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
-    
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
+    if (!canvas || !currentRoom) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
@@ -950,7 +1136,7 @@ function App() {
         // Resize shape
         const updatedShape = { ...shape };
 
-        if (shape.type === 'rectangle' && shape.width && shape.height) {
+        if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
           if (resizeHandle.includes('t')) {
             const newHeight = (shape.y + shape.height) - y;
             if (newHeight > 5) {
@@ -1002,19 +1188,33 @@ function App() {
         // Drag selected shape
         const newX = x - dragOffset.x;
         const newY = y - dragOffset.y;
-        
+        console.debug('dragging shape', { id: selectedShapeId, newX, newY });
+        // Update the entire shape object so text/content stays together with the sticky
         setShapes(prev => prev.map(s =>
           s.id === selectedShapeId
             ? { ...s, x: newX, y: newY }
             : s
         ));
-        
-        sendMessage({
-          type: 'updateShape',
-          roomId: currentRoom.roomId,
-          shapeId: selectedShapeId,
-          updates: { x: newX, y: newY }
-        });
+
+        // Find the updated shape to send the full object as updates (ensures text moves with sticky)
+        const updatedShape = shapes.find(s => s.id === selectedShapeId);
+        if (updatedShape) {
+          const full = { ...updatedShape, x: newX, y: newY };
+          sendMessage({
+            type: 'updateShape',
+            roomId: currentRoom.roomId,
+            shapeId: selectedShapeId,
+            updates: full
+          });
+        } else {
+          // fallback: send minimal update
+          sendMessage({
+            type: 'updateShape',
+            roomId: currentRoom.roomId,
+            shapeId: selectedShapeId,
+            updates: { x: newX, y: newY }
+          });
+        }
         
         redrawCanvas();
       }
@@ -1037,13 +1237,13 @@ function App() {
   const stopDrawing = () => {
     // Save current stroke if drawing with pen
     if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setStrokes(prev => [...prev, { points: currentStroke, isEraser: false }]);
       setCurrentStroke([]);
     }
     
     // Save current eraser stroke if erasing
     if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setStrokes(prev => [...prev, { points: currentEraserStroke, isEraser: true }]);
       setCurrentEraserStroke([]);
     }
     
@@ -1103,22 +1303,28 @@ function App() {
   // Touch event handlers for mobile/tablet support
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      setIsDrawing(true);
-      lastPoint.current = { x, y };
-      
-      // Start pen stroke
-      if (drawingMode === 'pen') {
-        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
-      } else if (drawingMode === 'eraser') {
-        // Start eraser stroke
-        const eraserWidth = getEraserSize();
-        setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
-      }
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
+    
+    setIsDrawing(true);
+    lastPoint.current = { x, y };
+    
+    // Start pen stroke
+    if (drawingMode === 'pen') {
+      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+    } else if (drawingMode === 'eraser') {
+      // Start eraser stroke
+      const eraserWidth = getEraserSize();
+      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
     }
   };
 
@@ -1129,8 +1335,12 @@ function App() {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -1225,13 +1435,13 @@ function App() {
     
     // Save current stroke if drawing with pen
     if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+      setStrokes(prev => [...prev, { points: currentStroke, isEraser: false }]);
       setCurrentStroke([]);
     }
     
     // Save current eraser stroke if erasing
     if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+      setStrokes(prev => [...prev, { points: currentEraserStroke, isEraser: true }]);
       setCurrentEraserStroke([]);
     }
     
@@ -1312,6 +1522,7 @@ function App() {
         connectionStatus={connectionStatus}
         drawingMode={drawingMode}
         userCursors={userCursors}
+        socket={wsRef.current}
         onBrushColorChange={setBrushColor}
         onBrushSizeChange={setBrushSize}
         onEraserSizeChange={setEraserSize}
@@ -1326,6 +1537,29 @@ function App() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onOpenBoardManager={() => setBoardManagerOpen(true)}
+        onImageUploadSuccess={() => {
+          setNotification({
+            message: '✅ Image uploaded successfully!',
+            type: 'success'
+          });
+        }}
+        onImageUploadError={(error) => {
+          setNotification({
+            message: `❌ Image upload failed: ${error}`,
+            type: 'error'
+          });
+        }}
+        onNotify={(message, type, duration) => setNotification({ message, type, duration })}
+        onAddStickyNote={handleAddStickyNote}
+        shapes={shapes}
+        selectedShapeId={selectedShapeId}
+        onDeleteShape={(shapeId: string) => {
+          if (!currentRoom) return;
+          setShapes(prev => prev.filter(s => s.id !== shapeId));
+          sendMessage({ type: 'deleteShape', roomId: currentRoom.roomId, shapeId });
+          setSelectedShapeId(null);
+          redrawCanvas();
+        }}
       />
       <BoardManager
         isOpen={boardManagerOpen}

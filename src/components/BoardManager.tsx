@@ -29,7 +29,7 @@ interface BoardManagerProps {
   username: string;
   onLoadBoard: (boardId: string) => void;
   shapes: Shape[];
-  strokes: { points: DrawPoint[] }[];
+  strokes: { points: DrawPoint[], isEraser: boolean }[];
 }
 
 const API_URL = "http://" + window.location.hostname + ":8081/api/boards";

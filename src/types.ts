@@ -1,3 +1,4 @@
+
 // Types for the Whiteboard application
 
 export interface DrawPoint {
@@ -9,7 +10,7 @@ export interface DrawPoint {
 
 export interface Shape {
   id: string;
-  type: 'rectangle' | 'circle' | 'line' | 'triangle' | 'text';
+  type: 'rectangle' | 'circle' | 'line' | 'triangle' | 'text' | 'image';
   x: number;
   y: number;
   width?: number;
@@ -23,6 +24,7 @@ export interface Shape {
   username: string;
   text?: string;
   fontSize?: number;
+  url?: string; // For image type
 }
 
 export interface BoardData {
@@ -34,7 +36,7 @@ export interface BoardData {
   strokes: { points: DrawPoint[] }[];
 }
 
-export type DrawingMode = 'pen' | 'eraser' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text';
+export type DrawingMode = 'pen' | 'eraser' | 'select' | 'rectangle' | 'circle' | 'line' | 'triangle' | 'fill' | 'text' | 'sticky';
 
 export interface Room {
   roomId: string;
@@ -49,4 +51,11 @@ export interface UserCursor {
   y: number;
   username: string;
   isDrawing: boolean;
+}
+
+export interface ChatMessage {
+  type: 'CHAT' | 'USER_JOINED' | 'USER_LEFT' | 'SYSTEM';
+  username: string;
+  message: string;
+  timestamp: number;
 }

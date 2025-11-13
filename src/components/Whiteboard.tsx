@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
 import './Whiteboard.css';
-import type { DrawingMode } from '../types';
+import type { DrawingMode, Shape } from '../types';
+import { ChatPanel } from './ChatPanel';
 
 interface WhiteboardProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -14,6 +15,7 @@ interface WhiteboardProps {
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
+  socket?: WebSocket | null;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
   onEraserSizeChange: (size: number) => void;
@@ -28,6 +30,13 @@ interface WhiteboardProps {
   onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onOpenBoardManager: () => void;
+  onImageUploadSuccess?: () => void;
+  onImageUploadError?: (error: string) => void;
+  onNotify?: (message: string, type: 'success' | 'error' | 'info', duration?: number) => void;
+  onAddStickyNote?: (color?: string) => void;
+  shapes?: Shape[];
+  selectedShapeId?: string | null;
+  onDeleteShape?: (shapeId: string) => void;
 }
 
 export const Whiteboard = ({
@@ -41,6 +50,7 @@ export const Whiteboard = ({
   connectionStatus,
   drawingMode,
   userCursors,
+  socket,
   onBrushColorChange,
   onBrushSizeChange,
   onEraserSizeChange,
@@ -55,8 +65,20 @@ export const Whiteboard = ({
   onTouchMove,
   onTouchEnd,
   onOpenBoardManager,
+  // onImageUploadSuccess,
+  // onImageUploadError,
+  onNotify,
+  onAddStickyNote,
+  shapes,
+  selectedShapeId,
+  onDeleteShape,
 }: WhiteboardProps) => {
+  // popup visibility is determined by drawingMode === 'sticky'
   const [showShapesDropdown, setShowShapesDropdown] = useState(false);
+  // const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
+  const [downloadFilename, setDownloadFilename] = useState('');
+  const [downloadFormat, setDownloadFormat] = useState<'png' | 'jpeg'>('png');
+  const [downloadOpen, setDownloadOpen] = useState(false);
 
   const shapeTools = [
     { mode: 'rectangle' as DrawingMode, icon: Square, label: 'Rectangle' },
@@ -68,10 +90,59 @@ export const Whiteboard = ({
   const isShapeMode = ['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode);
   const currentShapeTool = shapeTools.find(tool => tool.mode === drawingMode) || shapeTools[0];
 
+  // When user selects another drawing mode, any sticky popup will naturally be not shown
+  // because stickyColorOpen is derived from drawingMode.
+
+  // Download the current canvas as an image (PNG). Uses a temporary canvas to
+  // ensure a white background (avoids transparent PNGs looking odd).
+  const handleDownload = (filename?: string, format: 'png' | 'jpeg' = 'png') => {
+    const canvas = canvasRef?.current;
+    if (!canvas) return;
+
+    try {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvas.width;
+      tempCanvas.height = canvas.height;
+      const ctx = tempCanvas.getContext('2d');
+      if (!ctx) return;
+
+      // Fill white background then draw the real canvas on top
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      ctx.drawImage(canvas, 0, 0);
+
+      const mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const dataURL = tempCanvas.toDataURL(mime);
+
+      // Determine filename: use provided, otherwise use default with timestamp
+      let name = filename && filename.trim() ? filename.trim() : `whiteboard_${Date.now()}`;
+      // If user supplied an extension, respect it; otherwise append .png/.jpg accordingly
+      const lower = name.toLowerCase();
+      if (!/\.(png|jpg|jpeg)$/i.test(lower)) {
+        name = `${name}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      }
+
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = name;
+      // Programmatically click the link to trigger download
+      link.click();
+
+      // Notify caller (if provided) that download completed
+      if (onNotify) {
+        onNotify(`Downloaded ${name}`, 'success', 3000);
+      }
+    } catch (err) {
+      // Silent fail — could show a notification if desired
+      // eslint-disable-next-line no-console
+      console.error('Failed to download canvas image', err);
+    }
+  };
+
   return (
     <div className="whiteboard-view">
       {/* Toolbar */}
-      <div className="toolbar">
+  <div className="toolbar" style={{ position: 'relative' }}>
         <div className="toolbar-section">
           <h2 className="room-title">
             <Palette size={24} />
@@ -149,9 +220,61 @@ export const Whiteboard = ({
           >
             <Type size={18} />
           </button>
+          {/* Image upload temporarily disabled - ImageUploadTool component not available
+          <button 
+            className="tool-btn"
+            onClick={() => setIsImageUploadOpen(true)}
+            title="Upload Image"
+          >
+            <Image size={18} />
+          </button>
+          */}
+          {/* Sticky button placed next to Text tool so toolbar order remains consistent */}
+          <div className="sticky-dropdown" style={{ position: 'relative' }}>
+            <button
+              className={`tool-btn ${drawingMode === 'sticky' ? 'active' : ''}`}
+              onClick={() => {
+                // Toggle sticky mode: if already in sticky mode, switch back to select, otherwise activate sticky
+                if (drawingMode === 'sticky') {
+                  onDrawingModeChange('select');
+                } else {
+                  onDrawingModeChange('sticky');
+                }
+              }}
+              title="Sticky Note"
+              aria-label="Sticky Note"
+            >
+              <Square size={18} />
+            </button>
+
+            {drawingMode === 'sticky' && (
+              <div className="dropdown-menu" style={{ minWidth: 120, display: 'flex', gap: 6, padding: 8 }}>
+                {['#fff59d', '#ffcc80', '#c8e6c9', '#bbdefb', '#f8bbd0'].map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      if (onAddStickyNote) onAddStickyNote(c);
+                      // after creating one sticky, return to select so the toolbar active state follows selected tool
+                      onDrawingModeChange('select');
+                    }}
+                    title={`Create ${c} note`}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      border: '1px solid #ccc',
+                      background: c,
+                      padding: 0,
+                      cursor: 'pointer'
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="toolbar-section controls">
+  <div className="toolbar-section controls" style={{ position: 'relative' }}>
           <label className="control-item">
             <span>Color:</span>
             <input
@@ -222,6 +345,77 @@ export const Whiteboard = ({
             Boards
           </button>
 
+          {/* Keep toolbar layout unchanged: show only the Download button here. */}
+          
+          <button
+            onClick={() => setDownloadOpen((v) => !v)}
+            className="btn-download"
+            title="Download Whiteboard"
+          >
+            ⤓
+            Download
+          </button>
+
+          {/* Popup for filename & format appears only when downloadOpen is true. */}
+          {downloadOpen && (
+            <div
+              className="download-popup"
+              style={{
+                position: 'absolute',
+                top: '40px',
+                right: 0,
+                background: '#fff',
+                border: '1px solid rgba(0,0,0,0.12)',
+                padding: '8px',
+                borderRadius: '6px',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+                zIndex: 50,
+                minWidth: '220px'
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <input
+                  type="text"
+                  placeholder={`whiteboard_${Date.now()}`}
+                  value={downloadFilename}
+                  onChange={(e) => setDownloadFilename(e.target.value)}
+                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                />
+                <select
+                  value={downloadFormat}
+                  onChange={(e) => setDownloadFormat(e.target.value as 'png' | 'jpeg')}
+                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
+                >
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPG</option>
+                </select>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => {
+                      // Cancel
+                      setDownloadOpen(false);
+                    }}
+                    style={{ padding: '6px 10px' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      const filename = downloadFilename.trim() ? downloadFilename.trim() : undefined;
+                      handleDownload(filename, downloadFormat);
+                      setDownloadOpen(false);
+                      // reset filename field for next time
+                      setDownloadFilename('');
+                    }}
+                    style={{ padding: '6px 10px' }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <button onClick={onLeaveRoom} className="btn-leave">
             <LogOut size={18} />
             Leave
@@ -234,11 +428,33 @@ export const Whiteboard = ({
             {participants} online
           </span>
         </div>
+        {/* moved sticky control into the controls section above */}
       </div>
 
       {/* Canvas Area */}
       <div className="canvas-container">
         <div className="canvas-wrapper">
+            {/* Delete button overlay for selected sticky notes (only in select mode) */}
+            {selectedShapeId && onDeleteShape && drawingMode === 'select' && (() => {
+              const shape = shapes?.find((s: Shape) => s.id === selectedShapeId);
+              if (shape && shape.type === 'text' && shape.width && shape.height) {
+                // Position relative to canvas-wrapper (canvas coordinates)
+                const left = shape.x + shape.width - 12; // slight inset for button
+                const top = Math.max(0, shape.y - 12);
+                return (
+                  <button
+                    className="sticky-delete-btn"
+                    style={{ left: `${left}px`, top: `${top}px` }}
+                    onClick={() => onDeleteShape(shape.id)}
+                    title="Delete sticky note"
+                    aria-label="Delete sticky note"
+                  >
+                    ×
+                  </button>
+                );
+              }
+              return null;
+            })()}
           <canvas
             ref={canvasRef}
             width={1200}
@@ -279,6 +495,13 @@ export const Whiteboard = ({
           💡 Draw with mouse or touch • Change colors and sizes • Real-time collaboration
         </span>
       </div>
+
+      {/* Chat Panel */}
+      <ChatPanel 
+        socket={socket || null} 
+        username={username}
+        isVisible={true}
+      />
     </div>
   );
 };
