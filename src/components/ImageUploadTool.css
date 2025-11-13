@@ -1,0 +1,246 @@
+.image-upload-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-upload-modal {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.image-upload-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e1e4e8;
+}
+
+.image-upload-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #24292e;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #586069;
+  transition: background-color 0.2s;
+}
+
+.close-btn:hover:not(:disabled) {
+  background: #f1f3f5;
+}
+
+.close-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.image-upload-content {
+  padding: 1.5rem;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.image-upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  text-align: center;
+  min-height: 300px;
+}
+
+.upload-icon {
+  color: #0366d6;
+  margin-bottom: 1rem;
+}
+
+.image-upload-placeholder p {
+  color: #586069;
+  font-size: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.file-input {
+  display: none;
+}
+
+.btn-select-file {
+  background: #0366d6;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-select-file:hover:not(:disabled) {
+  background: #0256c2;
+}
+
+.btn-select-file:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.image-crop-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.image-crop-container img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.error-message {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: #fee;
+  color: #c33;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  width: 100%;
+  text-align: center;
+}
+
+.image-upload-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border-top: 1px solid #e1e4e8;
+}
+
+.btn-cancel,
+.btn-upload {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+}
+
+.btn-cancel {
+  background: #f1f3f5;
+  color: #24292e;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #e1e4e8;
+}
+
+.btn-upload {
+  background: #28a745;
+  color: white;
+}
+
+.btn-upload:hover:not(:disabled) {
+  background: #22863a;
+}
+
+.btn-upload:disabled,
+.btn-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ReactCrop styles override */
+.ReactCrop {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ReactCrop__crop-selection {
+  border: 2px solid #0366d6;
+  box-shadow: 0 0 0 9999em rgba(0, 0, 0, 0.5);
+}
+
+.ReactCrop__drag-handle {
+  width: 12px;
+  height: 12px;
+  background: #0366d6;
+  border: 2px solid white;
+  border-radius: 50%;
+}
+
+.ReactCrop__drag-handle::after {
+  background: rgba(3, 102, 214, 0.2);
+}
+
