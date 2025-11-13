@@ -30,6 +30,8 @@ interface WhiteboardProps {
   onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onOpenBoardManager: () => void;
+  onImageUploadSuccess?: () => void;
+  onImageUploadError?: (error: string) => void;
   onNotify?: (message: string, type: 'success' | 'error' | 'info', duration?: number) => void;
   onAddStickyNote?: (color?: string) => void;
   shapes?: Shape[];
@@ -63,6 +65,8 @@ export const Whiteboard = ({
   onTouchMove,
   onTouchEnd,
   onOpenBoardManager,
+  // onImageUploadSuccess,
+  // onImageUploadError,
   onNotify,
   onAddStickyNote,
   shapes,
@@ -71,6 +75,7 @@ export const Whiteboard = ({
 }: WhiteboardProps) => {
   // popup visibility is determined by drawingMode === 'sticky'
   const [showShapesDropdown, setShowShapesDropdown] = useState(false);
+  // const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [downloadFilename, setDownloadFilename] = useState('');
   const [downloadFormat, setDownloadFormat] = useState<'png' | 'jpeg'>('png');
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -215,6 +220,15 @@ export const Whiteboard = ({
           >
             <Type size={18} />
           </button>
+          {/* Image upload temporarily disabled - ImageUploadTool component not available
+          <button 
+            className="tool-btn"
+            onClick={() => setIsImageUploadOpen(true)}
+            title="Upload Image"
+          >
+            <Image size={18} />
+          </button>
+          */}
           {/* Sticky button placed next to Text tool so toolbar order remains consistent */}
           <div className="sticky-dropdown" style={{ position: 'relative' }}>
             <button

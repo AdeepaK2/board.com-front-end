@@ -104,12 +104,62 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
       }
       break;
     }
+
+    case 'image': {
+      if (shape.url && shape.width && shape.height) {
+        // Try to get image from cache (managed by App component)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const imageCache = (window as any).__imageCache;
+        
+        if (imageCache) {
+          const cachedImg = imageCache.get(shape.url);
+          
+          if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+            // Image is loaded, draw it
+            try {
+              ctx.drawImage(cachedImg, shape.x, shape.y, shape.width, shape.height);
+            } catch (e) {
+              // Fallback if drawImage fails
+              console.error('Error drawing image:', e);
+              drawImagePlaceholder(ctx, shape);
+            }
+          } else {
+            // Draw placeholder while loading
+            drawImagePlaceholder(ctx, shape);
+          }
+        } else {
+          // Cache not available, draw placeholder
+          drawImagePlaceholder(ctx, shape);
+        }
+      }
+      break;
+    }
   }
 
   ctx.restore();
 }
 
 /**
+<<<<<<< HEAD
+ * Draw placeholder for image while loading
+ */
+function drawImagePlaceholder(ctx: CanvasRenderingContext2D, shape: Shape) {
+  if (!shape.width || !shape.height) return;
+  
+  // Draw placeholder rectangle
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+  
+  // Draw loading text
+  ctx.fillStyle = '#999';
+  ctx.font = '12px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Loading...', shape.x + shape.width / 2, shape.y + shape.height / 2);
+=======
  * Wrap text into lines that fit within maxWidth using the provided canvas context.
  * Returns an array of lines.
  */
@@ -150,6 +200,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   }
   if (current) lines.push(current);
   return lines;
+>>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 }
 
 /**
@@ -284,6 +335,17 @@ export function isPointInShape(x: number, y: number, shape: Shape): boolean {
         }
       }
       break;
+
+    case 'image':
+      if (shape.width && shape.height) {
+        return (
+          x >= shape.x &&
+          x <= shape.x + shape.width &&
+          y >= shape.y &&
+          y <= shape.y + shape.height
+        );
+      }
+      break;
   }
   return false;
 }
@@ -363,6 +425,12 @@ export function drawSelectionHighlight(ctx: CanvasRenderingContext2D, shape: Sha
       }
       break;
 
+    case 'image':
+      if (shape.width && shape.height) {
+        ctx.strokeRect(shape.x - 5, shape.y - 5, shape.width + 10, shape.height + 10);
+      }
+      break;
+
     case 'circle':
       if (shape.radius) {
         ctx.beginPath();
@@ -426,6 +494,18 @@ export function drawResizeHandles(ctx: CanvasRenderingContext2D, shape: Shape): 
       {x: shape.x, y: shape.y + shape.height / 2},
       {x: shape.x + shape.width, y: shape.y + shape.height / 2}
     );
+  } else if (shape.type === 'image' && shape.width && shape.height) {
+    // Image shapes use same handles as rectangles
+    handles.push(
+      {x: shape.x, y: shape.y},
+      {x: shape.x + shape.width, y: shape.y},
+      {x: shape.x, y: shape.y + shape.height},
+      {x: shape.x + shape.width, y: shape.y + shape.height},
+      {x: shape.x + shape.width / 2, y: shape.y},
+      {x: shape.x + shape.width / 2, y: shape.y + shape.height},
+      {x: shape.x, y: shape.y + shape.height / 2},
+      {x: shape.x + shape.width, y: shape.y + shape.height / 2}
+    );
   } else if (shape.type === 'circle' && shape.radius) {
     handles.push(
       {x: shape.x, y: shape.y - shape.radius},
@@ -465,7 +545,11 @@ export function getResizeHandle(shape: Shape, x: number, y: number): string | nu
   const handleSize = 8;
   const tolerance = handleSize / 2;
 
+<<<<<<< HEAD
+  if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
+=======
   if ((shape.type === 'rectangle' || shape.type === 'text') && shape.width && shape.height) {
+>>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
     const handles = [
       {key: 'tl', x: shape.x, y: shape.y},
       {key: 'tr', x: shape.x + shape.width, y: shape.y},
