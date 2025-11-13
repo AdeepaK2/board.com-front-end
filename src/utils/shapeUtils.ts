@@ -480,7 +480,7 @@ export function generateShapeId(): string {
  * Draw resize handles for selected shape
  */
 export function drawResizeHandles(ctx: CanvasRenderingContext2D, shape: Shape): void {
-  const handleSize = 8;
+  const handleSize = 10; // Increased from 8 to 10 for better visibility
   const handles: {x: number, y: number}[] = [];
 
   if ((shape.type === 'rectangle' || shape.type === 'text') && shape.width && shape.height) {
@@ -542,8 +542,7 @@ export function drawResizeHandles(ctx: CanvasRenderingContext2D, shape: Shape): 
  * Get resize handle at point
  */
 export function getResizeHandle(shape: Shape, x: number, y: number): string | null {
-  const handleSize = 8;
-  const tolerance = handleSize / 2;
+  const tolerance = 12; // Increased tolerance for easier clicking
 
   if ((shape.type === 'rectangle' || shape.type === 'image' || shape.type === 'text') && shape.width && shape.height) {
     const handles = [

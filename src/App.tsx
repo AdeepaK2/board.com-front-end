@@ -1076,7 +1076,32 @@ function App() {
         redrawCanvas();
       }
     } else if (drawingMode === "select") {
-      // Check if clicking on a shape (check images last so they're on top)
+      // First check if we have a selected shape and if we're clicking on its resize handle
+      if (selectedShapeId) {
+        const selectedShape = shapes.find((s) => s.id === selectedShapeId);
+        if (selectedShape) {
+          // Check if clicking on a resize handle of the selected shape
+          const handle = getResizeHandle(selectedShape, x, y);
+          if (handle) {
+            setResizeHandle(handle);
+            setIsDrawing(true);
+            setDragOffset(null);
+            return; // Early return - we're resizing, don't check other shapes
+          }
+
+          // Check if clicking within the selected shape (to drag it)
+          if (isPointInShape(x, y, selectedShape)) {
+            // Calculate drag offset
+            setDragOffset({ x: x - selectedShape.x, y: y - selectedShape.y });
+            setResizeHandle(null);
+            setIsDrawing(true);
+            return; // Early return - we're dragging the same shape
+          }
+        }
+      }
+
+      // If we get here, either nothing is selected or we clicked outside the selected shape
+      // Check if clicking on a different shape (check images last so they're on top)
       const nonImageShapes = shapes.filter((s) => s.type !== "image");
       const imageShapes = shapes.filter((s) => s.type === "image");
       const allShapes = [...nonImageShapes, ...imageShapes].reverse();
@@ -1105,7 +1130,10 @@ function App() {
         }
         setIsDrawing(true);
       } else {
+        // Clicked on empty space - deselect
         setSelectedShapeId(null);
+        setResizeHandle(null);
+        setDragOffset(null);
       }
       redrawCanvas();
     } else if (
@@ -1280,6 +1308,29 @@ function App() {
     lastPoint.current = { x, y };
   };
 
+  // Helper function to get appropriate cursor for resize handles
+  const getResizeCursor = (handle: string): string => {
+    switch (handle) {
+      case "tl":
+      case "br":
+        return "nwse-resize";
+      case "tr":
+      case "bl":
+        return "nesw-resize";
+      case "t":
+      case "b":
+        return "ns-resize";
+      case "l":
+      case "r":
+        return "ew-resize";
+      case "start":
+      case "end":
+        return "move";
+      default:
+        return "default";
+    }
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !currentRoom) return;
@@ -1293,6 +1344,51 @@ function App() {
     const scaleY = canvas.height / rect.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
+
+    // Update cursor based on what's under the mouse
+    if (drawingMode === "select") {
+      let cursor = "default";
+
+      // Check if we're currently dragging or resizing
+      if (isDrawing && selectedShapeId) {
+        if (resizeHandle) {
+          cursor = getResizeCursor(resizeHandle);
+        } else if (dragOffset) {
+          cursor = "move";
+        }
+      } else {
+        // Not dragging - check what's under the cursor
+        const selectedShape = shapes.find((s) => s.id === selectedShapeId);
+        if (selectedShape) {
+          const handle = getResizeHandle(selectedShape, x, y);
+          if (handle) {
+            cursor = getResizeCursor(handle);
+          } else if (isPointInShape(x, y, selectedShape)) {
+            cursor = "move";
+          }
+        } else {
+          // No shape selected - check if hovering over any shape
+          const hoveredShape = [...shapes]
+            .reverse()
+            .find((shape) => isPointInShape(x, y, shape));
+          if (hoveredShape) {
+            cursor = "pointer";
+          }
+        }
+      }
+
+      canvas.style.cursor = cursor;
+    } else if (drawingMode === "pen") {
+      canvas.style.cursor = "crosshair";
+    } else if (drawingMode === "eraser") {
+      canvas.style.cursor = "not-allowed";
+    } else if (drawingMode === "text") {
+      canvas.style.cursor = "text";
+    } else if (drawingMode === "fill") {
+      canvas.style.cursor = "cell";
+    } else {
+      canvas.style.cursor = "crosshair";
+    }
 
     sendMessage({
       type: "cursor",
