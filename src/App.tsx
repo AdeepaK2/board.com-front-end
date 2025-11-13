@@ -883,11 +883,15 @@ function App() {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !currentRoom) return;
+    const rect = canvas.getBoundingClientRect();
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Get canvas coordinates accounting for scroll and CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     if (drawingMode === 'pen') {
       setIsDrawing(true);
@@ -997,8 +1001,13 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
@@ -1088,15 +1097,18 @@ function App() {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
-    
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
+    if (!canvas || !currentRoom) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
@@ -1278,22 +1290,28 @@ function App() {
   // Touch event handlers for mobile/tablet support
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      setIsDrawing(true);
-      lastPoint.current = { x, y };
-      
-      // Start pen stroke
-      if (drawingMode === 'pen') {
-        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
-      } else if (drawingMode === 'eraser') {
-        // Start eraser stroke
-        const eraserWidth = getEraserSize();
-        setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
-      }
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
+    
+    setIsDrawing(true);
+    lastPoint.current = { x, y };
+    
+    // Start pen stroke
+    if (drawingMode === 'pen') {
+      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+    } else if (drawingMode === 'eraser') {
+      // Start eraser stroke
+      const eraserWidth = getEraserSize();
+      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
     }
   };
 
@@ -1304,8 +1322,12 @@ function App() {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
