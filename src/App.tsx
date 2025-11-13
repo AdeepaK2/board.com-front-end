@@ -1,13 +1,20 @@
-
-import { useState, useRef, useEffect, useCallback } from 'react';
-import './App.css';
-import { LoginView } from './components/LoginView';
-import { RoomList } from './components/RoomList';
-import { Whiteboard } from './components/Whiteboard';
-import { BoardManager } from './components/BoardManager';
-import Notification from './components/Notification';
-import type { DrawingMode, Shape } from './types';
-import { drawShape, drawShapePreview, isPointInShape, drawSelectionHighlight, generateShapeId, drawResizeHandles, getResizeHandle } from './utils/shapeUtils';
+import { useState, useRef, useEffect, useCallback } from "react";
+import "./App.css";
+import { LoginView } from "./components/LoginView";
+import { RoomList } from "./components/RoomList";
+import { Whiteboard } from "./components/Whiteboard";
+import { BoardManager } from "./components/BoardManager";
+import Notification from "./components/Notification";
+import type { DrawingMode, Shape } from "./types";
+import {
+  drawShape,
+  drawShapePreview,
+  isPointInShape,
+  drawSelectionHighlight,
+  generateShapeId,
+  drawResizeHandles,
+  getResizeHandle,
+} from "./utils/shapeUtils";
 
 interface DrawPoint {
   x: number;
@@ -63,95 +70,107 @@ interface WebSocketMessage {
   };
 }
 
-type AppView = 'login' | 'roomList' | 'whiteboard';
+type AppView = "login" | "roomList" | "whiteboard";
 
 // Helper function to check if eraser is touching a shape
-function isShapeTouchedByEraser(eraserX: number, eraserY: number, eraserRadius: number, shape: Shape): boolean {
+function isShapeTouchedByEraser(
+  eraserX: number,
+  eraserY: number,
+  eraserRadius: number,
+  shape: Shape
+): boolean {
   switch (shape.type) {
-    case 'text': {
+    case "text": {
       if (shape.text) {
         // Measure text bounds
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
         if (ctx) {
           const fontSize = shape.fontSize || 16;
           ctx.font = `${fontSize}px Arial`;
           const textWidth = ctx.measureText(shape.text).width;
           const textHeight = fontSize;
-          
+
           // Check if eraser circle intersects with text rectangle
           const rectLeft = shape.x;
           const rectRight = shape.x + textWidth;
           const rectTop = shape.y;
           const rectBottom = shape.y + textHeight;
-          
+
           // Find closest point on rectangle to eraser center
           const closestX = Math.max(rectLeft, Math.min(eraserX, rectRight));
           const closestY = Math.max(rectTop, Math.min(eraserY, rectBottom));
-          
+
           // Check distance from eraser center to closest point
           const dx = eraserX - closestX;
           const dy = eraserY - closestY;
-          return (dx * dx + dy * dy) <= (eraserRadius * eraserRadius);
+          return dx * dx + dy * dy <= eraserRadius * eraserRadius;
         }
       }
       return false;
     }
-    
-    case 'rectangle': {
+
+    case "rectangle": {
       if (shape.width && shape.height) {
         const rectLeft = Math.min(shape.x, shape.x + shape.width);
         const rectRight = Math.max(shape.x, shape.x + shape.width);
         const rectTop = Math.min(shape.y, shape.y + shape.height);
         const rectBottom = Math.max(shape.y, shape.y + shape.height);
-        
+
         const closestX = Math.max(rectLeft, Math.min(eraserX, rectRight));
         const closestY = Math.max(rectTop, Math.min(eraserY, rectBottom));
-        
+
         const dx = eraserX - closestX;
         const dy = eraserY - closestY;
-        return (dx * dx + dy * dy) <= (eraserRadius * eraserRadius);
+        return dx * dx + dy * dy <= eraserRadius * eraserRadius;
       }
       return false;
     }
-    
-    case 'circle': {
+
+    case "circle": {
       if (shape.radius) {
         const dx = eraserX - shape.x;
         const dy = eraserY - shape.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         // Eraser touches circle if distance between centers is less than sum of radii
-        return distance <= (eraserRadius + shape.radius);
+        return distance <= eraserRadius + shape.radius;
       }
       return false;
     }
-    
-    case 'line': {
+
+    case "line": {
       if (shape.endX !== undefined && shape.endY !== undefined) {
         // Calculate distance from eraser center to line segment
         const dx = shape.endX - shape.x;
         const dy = shape.endY - shape.y;
         const lengthSquared = dx * dx + dy * dy;
-        
+
         if (lengthSquared === 0) {
           // Line is a point
           const pdx = eraserX - shape.x;
           const pdy = eraserY - shape.y;
           return Math.sqrt(pdx * pdx + pdy * pdy) <= eraserRadius;
         }
-        
-        const t = Math.max(0, Math.min(1, ((eraserX - shape.x) * dx + (eraserY - shape.y) * dy) / lengthSquared));
+
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((eraserX - shape.x) * dx + (eraserY - shape.y) * dy) /
+              lengthSquared
+          )
+        );
         const projX = shape.x + t * dx;
         const projY = shape.y + t * dy;
-        
+
         const pdx = eraserX - projX;
         const pdy = eraserY - projY;
         return Math.sqrt(pdx * pdx + pdy * pdy) <= eraserRadius;
       }
       return false;
     }
-    
-    case 'triangle': {
+
+    case "triangle": {
       if (shape.width && shape.height) {
         // Triangle vertices
         const x1 = shape.x + shape.width / 2;
@@ -160,46 +179,82 @@ function isShapeTouchedByEraser(eraserX: number, eraserY: number, eraserRadius: 
         const y2 = shape.y + shape.height;
         const x3 = shape.x + shape.width;
         const y3 = shape.y + shape.height;
-        
+
         // Check if eraser center is inside triangle
-        const area = 0.5 * (-y2 * x3 + y1 * (-x2 + x3) + x1 * (y2 - y3) + x2 * y3);
-        const s = (1 / (2 * area)) * (y1 * x3 - x1 * y3 + (y3 - y1) * eraserX + (x1 - x3) * eraserY);
-        const t = (1 / (2 * area)) * (x1 * y2 - y1 * x2 + (y1 - y2) * eraserX + (x2 - x1) * eraserY);
-        
+        const area =
+          0.5 * (-y2 * x3 + y1 * (-x2 + x3) + x1 * (y2 - y3) + x2 * y3);
+        const s =
+          (1 / (2 * area)) *
+          (y1 * x3 - x1 * y3 + (y3 - y1) * eraserX + (x1 - x3) * eraserY);
+        const t =
+          (1 / (2 * area)) *
+          (x1 * y2 - y1 * x2 + (y1 - y2) * eraserX + (x2 - x1) * eraserY);
+
         if (s >= 0 && t >= 0 && 1 - s - t >= 0) {
           return true; // Center is inside triangle
         }
-        
+
         // Check if eraser intersects any of the three edges
-        const distToEdge1 = distanceToLineSegment(eraserX, eraserY, x1, y1, x2, y2);
-        const distToEdge2 = distanceToLineSegment(eraserX, eraserY, x2, y2, x3, y3);
-        const distToEdge3 = distanceToLineSegment(eraserX, eraserY, x3, y3, x1, y1);
-        
+        const distToEdge1 = distanceToLineSegment(
+          eraserX,
+          eraserY,
+          x1,
+          y1,
+          x2,
+          y2
+        );
+        const distToEdge2 = distanceToLineSegment(
+          eraserX,
+          eraserY,
+          x2,
+          y2,
+          x3,
+          y3
+        );
+        const distToEdge3 = distanceToLineSegment(
+          eraserX,
+          eraserY,
+          x3,
+          y3,
+          x1,
+          y1
+        );
+
         return Math.min(distToEdge1, distToEdge2, distToEdge3) <= eraserRadius;
       }
       return false;
     }
-    
+
     default:
       return false;
   }
 }
 
-function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+function distanceToLineSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const lengthSquared = dx * dx + dy * dy;
-  
+
   if (lengthSquared === 0) {
     const pdx = px - x1;
     const pdy = py - y1;
     return Math.sqrt(pdx * pdx + pdy * pdy);
   }
-  
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+
+  const t = Math.max(
+    0,
+    Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared)
+  );
   const projX = x1 + t * dx;
   const projY = y1 + t * dy;
-  
+
   const pdx = px - projX;
   const pdy = py - projY;
   return Math.sqrt(pdx * pdx + pdy * pdy);
@@ -208,38 +263,52 @@ function distanceToLineSegment(px: number, py: number, x1: number, y1: number, x
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const [view, setView] = useState<AppView>('login');
-  const [username, setUsername] = useState('');
+  const [view, setView] = useState<AppView>("login");
+  const [username, setUsername] = useState("");
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [brushColor, setBrushColor] = useState('#000000');
+  const [brushColor, setBrushColor] = useState("#000000");
   const [brushSize, setBrushSize] = useState(3);
   const [eraserSize, setEraserSize] = useState(2); // 1=small, 2=medium, 3=large, 4=extra-large
   const [isDrawing, setIsDrawing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
-  const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(new Map());
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info'; duration?: number } | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState("Disconnected");
+  const [userCursors, setUserCursors] = useState<Map<string, UserCursor>>(
+    new Map()
+  );
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: "success" | "error" | "info";
+    duration?: number;
+  } | null>(null);
   const [activeUsers, setActiveUsers] = useState<string[]>([]);
-  
+
   // Shape-related states
-  const [drawingMode, setDrawingMode] = useState<DrawingMode>('pen');
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>("pen");
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [strokes, setStrokes] = useState<{ points: DrawPoint[] }[]>([]);
-  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>([]);
+  const [eraserStrokes, setEraserStrokes] = useState<{ points: DrawPoint[] }[]>(
+    []
+  );
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [isDrawingShape, setIsDrawingShape] = useState(false);
-  const [shapeStart, setShapeStart] = useState<{x: number, y: number} | null>(null);
-  const [dragOffset, setDragOffset] = useState<{x: number, y: number} | null>(null);
+  const [shapeStart, setShapeStart] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const [resizeHandle, setResizeHandle] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'l', 'r', 't', 'b'
   const [boardManagerOpen, setBoardManagerOpen] = useState(false);
-  const [editingText, setEditingText] = useState<string>('');
+  const [editingText, setEditingText] = useState<string>("");
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
-  const [currentEraserStroke, setCurrentEraserStroke] = useState<DrawPoint[]>([]);
-  
+  const [currentEraserStroke, setCurrentEraserStroke] = useState<DrawPoint[]>(
+    []
+  );
+
   // Image cache for loaded images
   const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
-  
+
   // Initialize image cache on window for shapeUtils access
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -249,29 +318,33 @@ function App() {
       delete (window as any).__imageCache;
     };
   }, []);
-  
+
   // Load images when shapes change
   useEffect(() => {
     const loadImages = () => {
-      shapes.forEach(shape => {
-        if (shape.type === 'image' && shape.url && !imageCache.current.has(shape.url)) {
+      shapes.forEach((shape) => {
+        if (
+          shape.type === "image" &&
+          shape.url &&
+          !imageCache.current.has(shape.url)
+        ) {
           const img = new Image();
-          img.crossOrigin = 'anonymous';
+          img.crossOrigin = "anonymous";
           img.src = shape.url;
           img.onload = () => {
             imageCache.current.set(shape.url!, img);
             // Trigger canvas redraw by updating a dummy state or calling redraw directly
             const canvas = canvasRef.current;
             if (canvas) {
-              const ctx = canvas.getContext('2d');
+              const ctx = canvas.getContext("2d");
               if (ctx) {
                 // Redraw will be triggered by the shapes useEffect
-                setShapes(prev => [...prev]); // Trigger re-render
+                setShapes((prev) => [...prev]); // Trigger re-render
               }
             }
           };
           img.onerror = () => {
-            console.error('Failed to load image:', shape.url);
+            console.error("Failed to load image:", shape.url);
           };
           imageCache.current.set(shape.url, img); // Store immediately to prevent duplicate loads
         }
@@ -279,16 +352,16 @@ function App() {
     };
     loadImages();
   }, [shapes]);
-  
+
   // Auto-detect WebSocket server based on current hostname
   const serverUrl = (() => {
     const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return 'ws://localhost:8080';
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "ws://localhost:8080";
     }
     return `ws://${hostname}:8080`;
   })();
-  
+
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
 
   // Calculate eraser size based on selection (1-4)
@@ -301,29 +374,29 @@ function App() {
     // Display connection info in console
     const hostname = window.location.hostname;
     const currentUrl = window.location.href;
-    
-    console.log('='.repeat(50));
-    console.log('🌐 WHITEBOARD APP - NETWORK INFO');
-    console.log('='.repeat(50));
-    console.log('📡 WebSocket Server:', serverUrl);
-    console.log('🖥️  Current URL:', currentUrl);
-    console.log('📱 Share URL with others:', `http://${hostname}:5173`);
-    console.log('💡 Tip: Others can access from any device on same WiFi');
-    console.log('='.repeat(50));
+
+    console.log("=".repeat(50));
+    console.log("🌐 WHITEBOARD APP - NETWORK INFO");
+    console.log("=".repeat(50));
+    console.log("📡 WebSocket Server:", serverUrl);
+    console.log("🖥️  Current URL:", currentUrl);
+    console.log("📱 Share URL with others:", `http://${hostname}:5173`);
+    console.log("💡 Tip: Others can access from any device on same WiFi");
+    console.log("=".repeat(50));
   }, [serverUrl]);
 
   const connectWebSocket = () => {
-    const ws = new WebSocket(serverUrl || 'ws://localhost:8080');
+    const ws = new WebSocket(serverUrl || "ws://localhost:8080");
     wsRef.current = ws;
-    ws.onopen = () => setConnectionStatus('Connected');
-    ws.onclose = () => setConnectionStatus('Disconnected');
-    ws.onerror = () => setConnectionStatus('Connection Error');
+    ws.onopen = () => setConnectionStatus("Connected");
+    ws.onclose = () => setConnectionStatus("Disconnected");
+    ws.onerror = () => setConnectionStatus("Connection Error");
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
         handleWebSocketMessage(message);
       } catch (error) {
-        console.error('Error parsing message:', error);
+        console.error("Error parsing message:", error);
       }
     };
   };
@@ -337,14 +410,14 @@ function App() {
   }, [serverUrl]);
 
   const handleWebSocketMessage = (message: WebSocketMessage) => {
-    console.log('Received message:', message.type, message);
-    
+    console.log("Received message:", message.type, message);
+
     switch (message.type) {
-      case 'roomList':
+      case "roomList":
         setRooms(message.rooms || []);
         break;
-      case 'roomCreated':
-      case 'roomJoined':
+      case "roomCreated":
+      case "roomJoined":
         if (message.roomId && message.roomName) {
           setCurrentRoom({
             roomId: message.roomId,
@@ -353,53 +426,66 @@ function App() {
             participants: 1,
             hasPassword: false,
           });
-          setView('whiteboard');
+          setView("whiteboard");
           clearCanvas();
         }
         break;
-      case 'draw':
+      case "draw":
         if (message.username !== username && message.points) {
           drawPoints(message.points);
           // Check if this is an eraser stroke or pen stroke
-          const isEraserStroke = message.points.length > 0 && message.points[0].color === 'eraser';
-          
+          const isEraserStroke =
+            message.points.length > 0 && message.points[0].color === "eraser";
+
           if (isEraserStroke) {
             // Store incoming eraser stroke - always append to create continuous eraser path
             if (message.points) {
-              setEraserStrokes(prev => [...prev, { points: message.points! }]);
+              setEraserStrokes((prev) => [
+                ...prev,
+                { points: message.points! },
+              ]);
             }
           } else {
             // Store incoming pen stroke - always append to create continuous pen path
             if (message.points) {
-              setStrokes(prev => [...prev, { points: message.points! }]);
+              setStrokes((prev) => [...prev, { points: message.points! }]);
             }
           }
         }
         break;
-      case 'addShape':
+      case "addShape":
         if (message.shape) {
-          setShapes(prev => [...prev, message.shape as Shape]);
+          setShapes((prev) => [...prev, message.shape as Shape]);
           redrawCanvas();
         }
         break;
-      case 'updateShape':
+      case "updateShape":
         if (message.shapeId && message.updates) {
-          setShapes(prev => prev.map(shape => 
-            shape.id === message.shapeId 
-              ? { ...shape, ...message.updates }
-              : shape
-          ));
+          setShapes((prev) =>
+            prev.map((shape) =>
+              shape.id === message.shapeId
+                ? { ...shape, ...message.updates }
+                : shape
+            )
+          );
           redrawCanvas();
         }
         break;
-      case 'deleteShape':
+      case "deleteShape":
         if (message.shapeId) {
-          setShapes(prev => prev.filter(shape => shape.id !== message.shapeId));
+          setShapes((prev) =>
+            prev.filter((shape) => shape.id !== message.shapeId)
+          );
           redrawCanvas();
         }
         break;
-      case 'cursor':
-        if (message.username && message.username !== username && message.x !== undefined && message.y !== undefined) {
+      case "cursor":
+        if (
+          message.username &&
+          message.username !== username &&
+          message.x !== undefined &&
+          message.y !== undefined
+        ) {
           setUserCursors((prev) => {
             const newCursors = new Map(prev);
             newCursors.set(message.username!, {
@@ -412,107 +498,121 @@ function App() {
           });
         }
         break;
-      case 'clear':
+      case "clear":
         clearCanvas();
         setShapes([]);
         setSelectedShapeId(null);
         break;
-      case 'error':
+      case "error":
         if (message.message) {
           alert(message.message);
         }
         break;
-      case 'userJoined':
-      case 'userLeft':
+      case "userJoined":
+      case "userLeft":
         if (currentRoom) {
-          setCurrentRoom({ ...currentRoom, participants: message.participants || currentRoom.participants });
-        }
-        break;
-      case 'newPublicRoom':
-        // Show notification when a new public room is created (but not to the creator)
-        if (message.roomName && message.creator && message.creator !== username) {
-          setNotification({
-            message: `🎨 ${message.creator} created a new room: "${message.roomName}"`,
-            type: 'info'
+          setCurrentRoom({
+            ...currentRoom,
+            participants: message.participants || currentRoom.participants,
           });
         }
         break;
-      case 'activeUsers':
+      case "newPublicRoom":
+        // Show notification when a new public room is created (but not to the creator)
+        if (
+          message.roomName &&
+          message.creator &&
+          message.creator !== username
+        ) {
+          setNotification({
+            message: `🎨 ${message.creator} created a new room: "${message.roomName}"`,
+            type: "info",
+          });
+        }
+        break;
+      case "activeUsers":
         if (message.users) {
           setActiveUsers(message.users);
         }
         break;
-      case 'newPrivateRoomInvite':
+      case "newPrivateRoomInvite":
         // Show notification when invited to a private room
         if (message.roomName && message.creator) {
           setNotification({
             message: `🔒 ${message.creator} invited you to private room: "${message.roomName}"`,
-            type: 'info'
+            type: "info",
           });
         }
         break;
-      case 'shapeAdded':
+      case "shapeAdded":
         // Handle image upload broadcast - specifically for IMAGE shapeType
-        if (message.payload && message.payload.shapeType === 'IMAGE' && message.payload.url) {
+        if (
+          message.payload &&
+          message.payload.shapeType === "IMAGE" &&
+          message.payload.url
+        ) {
           const imageUrl = message.payload.url; // Store in const to avoid undefined issues
           const imageWidth = message.payload.width;
           const imageHeight = message.payload.height;
-          
+
           // Create image shape with dimensions from payload (backend provides actual dimensions)
           const imageShape: Shape = {
             id: generateShapeId(),
-            type: 'image',
+            type: "image",
             x: message.payload.x || 100,
             y: message.payload.y || 100,
-            color: '#000000',
+            color: "#000000",
             size: 1,
-            username: username || 'system',
+            username: username || "system",
             url: imageUrl,
             width: imageWidth || 200,
             height: imageHeight || 200,
           };
-          
+
           // Preload image into cache if not already loaded
           if (!imageCache.current.has(imageUrl)) {
             const img = new Image();
-            img.crossOrigin = 'anonymous';
+            img.crossOrigin = "anonymous";
             img.src = imageUrl;
             img.onload = () => {
               imageCache.current.set(imageUrl, img);
               // If dimensions weren't provided, update with actual image dimensions
               if (!imageWidth || !imageHeight) {
-                setShapes(prev => prev.map(s => 
-                  s.id === imageShape.id 
-                    ? { ...s, width: img.width, height: img.height }
-                    : s
-                ));
+                setShapes((prev) =>
+                  prev.map((s) =>
+                    s.id === imageShape.id
+                      ? { ...s, width: img.width, height: img.height }
+                      : s
+                  )
+                );
               }
               redrawCanvas();
             };
             img.onerror = () => {
-              console.error('Failed to load image:', imageUrl);
+              console.error("Failed to load image:", imageUrl);
             };
             imageCache.current.set(imageUrl, img);
           }
-          
-          setShapes(prev => {
+
+          setShapes((prev) => {
             // Avoid duplicates - check if image with same URL already exists at this position
-            const exists = prev.some(s => 
-              s.type === 'image' && 
-              s.url === imageUrl &&
-              Math.abs(s.x - imageShape.x) < 50 &&
-              Math.abs(s.y - imageShape.y) < 50
+            const exists = prev.some(
+              (s) =>
+                s.type === "image" &&
+                s.url === imageUrl &&
+                Math.abs(s.x - imageShape.x) < 50 &&
+                Math.abs(s.y - imageShape.y) < 50
             );
             if (exists) return prev;
             return [...prev, imageShape];
           });
-          
+
           redrawCanvas();
-          
+
           // Show notification
           setNotification({
-            message: '🖼️ Image added to whiteboard',
-            type: 'info'
+            message: "🖼️ Image added to whiteboard",
+            type: "info",
           });
         }
         break;
@@ -525,62 +625,78 @@ function App() {
     }
   };
 
-  const handleLogin = async (name: string, password: string, isNewUser: boolean) => {
+  const handleLogin = async (
+    name: string,
+    password: string,
+    isNewUser: boolean
+  ) => {
     setUsername(name);
-    
-    console.log('handleLogin called:', { name, isNewUser });
-    
+
+    console.log("handleLogin called:", { name, isNewUser });
+
     const API_BASE_URL = `http://${window.location.hostname}:8081/api/auth`;
-    
+
     try {
       if (isNewUser) {
         // Register via REST API
-        console.log('Sending register request');
+        console.log("Sending register request");
         const response = await fetch(`${API_BASE_URL}/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: name, password })
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: name, password }),
         });
-        
+
         const data = await response.json();
-        console.log('Register response:', data);
-        
+        console.log("Register response:", data);
+
         if (data.success) {
-          setNotification({ message: '✅ Registration successful! You can now login.', type: 'success' });
+          setNotification({
+            message: "✅ Registration successful! You can now login.",
+            type: "success",
+          });
         } else {
-          setNotification({ message: `❌ ${data.message || 'Registration failed'}`, type: 'error' });
+          setNotification({
+            message: `❌ ${data.message || "Registration failed"}`,
+            type: "error",
+          });
         }
       } else {
         // Login via REST API
-        console.log('Sending login request');
+        console.log("Sending login request");
         const response = await fetch(`${API_BASE_URL}/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: name, password })
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: name, password }),
         });
-        
+
         const data = await response.json();
-        console.log('Login response:', data);
-        
+        console.log("Login response:", data);
+
         if (data.success) {
           // Save username to localStorage for next visit
-          localStorage.setItem('whiteboard_username', name);
+          localStorage.setItem("whiteboard_username", name);
           // Send setUsername to WebSocket to join the server
-          sendMessage({ type: 'setUsername', username: name });
-          setView('roomList');
-          setNotification({ message: '✅ Login successful!', type: 'success' });
+          sendMessage({ type: "setUsername", username: name });
+          setView("roomList");
+          setNotification({ message: "✅ Login successful!", type: "success" });
         } else {
-          setNotification({ message: `❌ ${data.message || 'Login failed'}`, type: 'error' });
+          setNotification({
+            message: `❌ ${data.message || "Login failed"}`,
+            type: "error",
+          });
         }
       }
     } catch (error) {
-      console.error('Auth error:', error);
-      setNotification({ message: '❌ Connection error. Please try again.', type: 'error' });
+      console.error("Auth error:", error);
+      setNotification({
+        message: "❌ Connection error. Please try again.",
+        type: "error",
+      });
     }
   };
 
   const requestActiveUsers = () => {
-    sendMessage({ type: 'getActiveUsers' });
+    sendMessage({ type: "getActiveUsers" });
   };
 
   // Create and broadcast a sticky note (text box) centered on the canvas
@@ -595,58 +711,68 @@ function App() {
     const shapeId = generateShapeId();
     const newShape: Shape = {
       id: shapeId,
-      type: 'text',
+      type: "text",
       x,
       y,
       width: noteWidth,
       height: noteHeight,
-      color: '#000000',
+      color: "#000000",
       size: 2,
-      fillColor: color || '#fff59d', // allow provided color
+      fillColor: color || "#fff59d", // allow provided color
       username: username,
-      text: '', // start empty so user can type immediately
-      fontSize: 16
+      text: "", // start empty so user can type immediately
+      fontSize: 16,
     };
 
     // Add locally and broadcast to other clients
-    setShapes(prev => [...prev, newShape]);
+    setShapes((prev) => [...prev, newShape]);
     // Open in edit mode immediately
     setEditingTextId(shapeId);
-    setEditingText('');
+    setEditingText("");
 
-    sendMessage({ type: 'addShape', roomId: currentRoom.roomId, shapeId, shape: newShape });
+    sendMessage({
+      type: "addShape",
+      roomId: currentRoom.roomId,
+      shapeId,
+      shape: newShape,
+    });
     // Redraw after state updates
     setTimeout(() => redrawCanvas(), 0);
   };
 
   const handleLogout = () => {
     if (currentRoom) {
-      sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
+      sendMessage({ type: "leaveRoom", roomId: currentRoom.roomId });
     }
-    setView('login');
+    setView("login");
     setCurrentRoom(null);
-    setUsername('');
+    setUsername("");
   };
 
-  const handleCreateRoom = (roomName: string, isPublic: boolean, password?: string, invitedUsers?: string[]) => {
-    sendMessage({ 
-      type: 'createRoom', 
-      roomName, 
-      isPublic, 
+  const handleCreateRoom = (
+    roomName: string,
+    isPublic: boolean,
+    password?: string,
+    invitedUsers?: string[]
+  ) => {
+    sendMessage({
+      type: "createRoom",
+      roomName,
+      isPublic,
       password: password || null,
-      invitedUsers: invitedUsers || []
+      invitedUsers: invitedUsers || [],
     });
   };
 
   const handleJoinRoom = (roomId: string, password?: string) => {
-    sendMessage({ type: 'joinRoom', roomId, password: password || null });
+    sendMessage({ type: "joinRoom", roomId, password: password || null });
   };
 
   const handleLeaveRoom = () => {
     if (currentRoom) {
-      sendMessage({ type: 'leaveRoom', roomId: currentRoom.roomId });
+      sendMessage({ type: "leaveRoom", roomId: currentRoom.roomId });
       setCurrentRoom(null);
-      setView('roomList');
+      setView("roomList");
       setUserCursors(new Map());
     }
   };
@@ -654,7 +780,7 @@ function App() {
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     if (canvas) {
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -667,67 +793,67 @@ function App() {
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    
+
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+
     // Redraw all strokes (pencil drawings)
-    strokes.forEach(stroke => {
+    strokes.forEach((stroke) => {
       if (stroke.points.length < 2) return;
       for (let i = 0; i < stroke.points.length - 1; i++) {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
-        
-        ctx.globalCompositeOperation = 'source-over';
+
+        ctx.globalCompositeOperation = "source-over";
         ctx.strokeStyle = start.color;
         ctx.lineWidth = start.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
         ctx.stroke();
       }
     });
-    
+
     // Apply eraser strokes
-    eraserStrokes.forEach(stroke => {
+    eraserStrokes.forEach((stroke) => {
       if (stroke.points.length < 2) return;
       for (let i = 0; i < stroke.points.length - 1; i++) {
         const start = stroke.points[i];
         const end = stroke.points[i + 1];
-        
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
+
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.strokeStyle = "rgba(0,0,0,1)";
         ctx.lineWidth = start.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
         ctx.stroke();
       }
     });
-    
-    ctx.globalCompositeOperation = 'source-over'; // Reset
-    
+
+    ctx.globalCompositeOperation = "source-over"; // Reset
+
     // Redraw all shapes (draw images last so they appear on top)
-    const nonImageShapes = shapes.filter(s => s.type !== 'image');
-    const imageShapes = shapes.filter(s => s.type === 'image');
-    
+    const nonImageShapes = shapes.filter((s) => s.type !== "image");
+    const imageShapes = shapes.filter((s) => s.type === "image");
+
     // Draw non-image shapes first
-    nonImageShapes.forEach(shape => {
+    nonImageShapes.forEach((shape) => {
       drawShape(ctx, shape);
       if (shape.id === selectedShapeId) {
         drawSelectionHighlight(ctx, shape);
         drawResizeHandles(ctx, shape);
       }
     });
-    
+
     // Draw image shapes on top
-    imageShapes.forEach(shape => {
+    imageShapes.forEach((shape) => {
       drawShape(ctx, shape);
       if (shape.id === selectedShapeId) {
         drawSelectionHighlight(ctx, shape);
@@ -736,37 +862,47 @@ function App() {
     });
   }, [shapes, strokes, eraserStrokes, selectedShapeId]);
 
-  // Auto-redraw when shapes or strokes change
+  // Auto-redraw when shapes, strokes, or eraserStrokes change
   useEffect(() => {
     redrawCanvas();
-  }, [shapes, strokes, redrawCanvas]);
+  }, [shapes, strokes, eraserStrokes, redrawCanvas]);
 
-  const updateTextShape = useCallback((newText: string) => {
-    if (!editingTextId || !currentRoom) return;
-    setShapes(prev => prev.map(shape => 
-      shape.id === editingTextId ? { ...shape, text: newText } : shape
-    ));
-    
-    // Send update to server so other clients see it in real-time
-    sendMessage({
-      type: 'updateShape',
-      roomId: currentRoom.roomId,
-      shapeId: editingTextId,
-      updates: { text: newText }
-    });
-    
-    redrawCanvas();
-  }, [editingTextId, currentRoom, redrawCanvas]);
+  const updateTextShape = useCallback(
+    (newText: string) => {
+      if (!editingTextId || !currentRoom) return;
+      setShapes((prev) =>
+        prev.map((shape) =>
+          shape.id === editingTextId ? { ...shape, text: newText } : shape
+        )
+      );
+
+      // Send update to server so other clients see it in real-time
+      sendMessage({
+        type: "updateShape",
+        roomId: currentRoom.roomId,
+        shapeId: editingTextId,
+        updates: { text: newText },
+      });
+
+      redrawCanvas();
+    },
+    [editingTextId, currentRoom, redrawCanvas]
+  );
 
   // Handle keyboard events for delete and text editing
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle keyboard events when in whiteboard view
-      if (view !== 'whiteboard') return;
+      if (view !== "whiteboard") return;
       // If the user is focused on a form control (input/textarea/contentEditable),
       // don't intercept keys here so normal typing works (e.g., filename input).
       const active = document.activeElement as HTMLElement | null;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+      if (
+        active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable)
+      ) {
         return; // let the focused element handle the key event
       }
 
@@ -774,157 +910,180 @@ function App() {
       if (editingTextId) {
         e.preventDefault(); // Prevent default browser behavior while editing
 
-        if (e.key === 'Escape') {
+        if (e.key === "Escape") {
           // Cancel text editing - remove empty text or keep existing
-          const shape = shapes.find(s => s.id === editingTextId);
+          const shape = shapes.find((s) => s.id === editingTextId);
           if (shape && !shape.text) {
-            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+            setShapes((prev) => prev.filter((s) => s.id !== editingTextId));
             if (currentRoom) {
               sendMessage({
-                type: 'deleteShape',
+                type: "deleteShape",
                 roomId: currentRoom.roomId,
-                shapeId: editingTextId
+                shapeId: editingTextId,
               });
             }
           }
           setEditingTextId(null);
-          setEditingText('');
+          setEditingText("");
           redrawCanvas();
-        } else if (e.key === 'Enter' && !e.shiftKey) {
+        } else if (e.key === "Enter" && !e.shiftKey) {
           // Finish text editing
           if (editingText.trim()) {
-            const shape = shapes.find(s => s.id === editingTextId);
+            const shape = shapes.find((s) => s.id === editingTextId);
             if (shape) {
               const updatedShape = { ...shape, text: editingText.trim() };
-              setShapes(prev => prev.map(s => s.id === editingTextId ? updatedShape : s));
+              setShapes((prev) =>
+                prev.map((s) => (s.id === editingTextId ? updatedShape : s))
+              );
               // No need to send addShape - shape was already sent when created,
               // and updates were sent while typing
             }
           } else if (!editingText.trim()) {
             // Remove empty text
-            setShapes(prev => prev.filter(s => s.id !== editingTextId));
+            setShapes((prev) => prev.filter((s) => s.id !== editingTextId));
             if (currentRoom) {
               sendMessage({
-                type: 'deleteShape',
+                type: "deleteShape",
                 roomId: currentRoom.roomId,
-                shapeId: editingTextId
+                shapeId: editingTextId,
               });
             }
           }
           setEditingTextId(null);
-          setEditingText('');
+          setEditingText("");
           redrawCanvas();
-        } else if (e.key === 'Backspace') {
+        } else if (e.key === "Backspace") {
           const newText = editingText.slice(0, -1);
           setEditingText(newText);
           updateTextShape(newText);
-        } else if (e.key.length === 1 || e.key === ' ') {
+        } else if (e.key.length === 1 || e.key === " ") {
           const newText = editingText + e.key;
           setEditingText(newText);
           updateTextShape(newText);
         }
         return;
       }
-      
+
       // Handle delete for selected shapes
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShapeId && currentRoom) {
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedShapeId &&
+        currentRoom
+      ) {
         // Delete selected shape
-        setShapes(prev => prev.filter(shape => shape.id !== selectedShapeId));
+        setShapes((prev) =>
+          prev.filter((shape) => shape.id !== selectedShapeId)
+        );
         sendMessage({
-          type: 'deleteShape',
+          type: "deleteShape",
           roomId: currentRoom.roomId,
-          shapeId: selectedShapeId
+          shapeId: selectedShapeId,
         });
         setSelectedShapeId(null);
         redrawCanvas();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedShapeId, currentRoom, redrawCanvas, editingTextId, editingText, shapes, updateTextShape, view]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    selectedShapeId,
+    currentRoom,
+    redrawCanvas,
+    editingTextId,
+    editingText,
+    shapes,
+    updateTextShape,
+    view,
+  ]);
 
   const handleClearClick = () => {
     if (currentRoom) {
       clearCanvas();
       setShapes([]);
       setSelectedShapeId(null);
-      sendMessage({ type: 'clear', roomId: currentRoom.roomId });
+      sendMessage({ type: "clear", roomId: currentRoom.roomId });
     }
   };
 
   const drawPoints = (points: DrawPoint[]) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
     for (let i = 0; i < points.length - 1; i++) {
       const start = points[i];
       const end = points[i + 1];
-      
-      if (start.color === 'eraser') {
+
+      if (start.color === "eraser") {
         // Draw eraser stroke
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.strokeStyle = 'rgba(0,0,0,1)';
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.strokeStyle = "rgba(0,0,0,1)";
       } else {
-        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalCompositeOperation = "source-over";
         ctx.strokeStyle = start.color;
       }
-      
+
       ctx.lineWidth = start.size;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
     }
-    ctx.globalCompositeOperation = 'source-over'; // Reset
+    ctx.globalCompositeOperation = "source-over"; // Reset
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !currentRoom) return;
     const rect = canvas.getBoundingClientRect();
-    
+
     // Get canvas coordinates accounting for scroll and CSS scaling
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
-    if (drawingMode === 'pen') {
+    if (drawingMode === "pen") {
       setIsDrawing(true);
       lastPoint.current = { x, y };
       // Start a new stroke
       setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
-    } else if (drawingMode === 'eraser') {
+    } else if (drawingMode === "eraser") {
       setIsDrawing(true);
       lastPoint.current = { x, y };
       // Start eraser stroke
       const eraserWidth = getEraserSize();
-      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
-    } else if (drawingMode === 'fill' && currentRoom) {
+      setCurrentEraserStroke([{ x, y, color: "eraser", size: eraserWidth }]);
+    } else if (drawingMode === "fill" && currentRoom) {
       // Fill clicked shape
-      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
+      const clickedShape = [...shapes]
+        .reverse()
+        .find((shape) => isPointInShape(x, y, shape));
       if (clickedShape) {
         const updatedShape = { ...clickedShape, fillColor: brushColor };
-        setShapes(prev => prev.map(s => s.id === clickedShape.id ? updatedShape : s));
+        setShapes((prev) =>
+          prev.map((s) => (s.id === clickedShape.id ? updatedShape : s))
+        );
         sendMessage({
-          type: 'updateShape',
+          type: "updateShape",
           roomId: currentRoom.roomId,
           shapeId: clickedShape.id,
-          updates: updatedShape
+          updates: updatedShape,
         });
         redrawCanvas();
       }
-    } else if (drawingMode === 'select') {
+    } else if (drawingMode === "select") {
       // Check if clicking on a shape (check images last so they're on top)
-      const nonImageShapes = shapes.filter(s => s.type !== 'image');
-      const imageShapes = shapes.filter(s => s.type === 'image');
+      const nonImageShapes = shapes.filter((s) => s.type !== "image");
+      const imageShapes = shapes.filter((s) => s.type === "image");
       const allShapes = [...nonImageShapes, ...imageShapes].reverse();
-      const clickedShape = allShapes.find(shape => isPointInShape(x, y, shape));
-      
+      const clickedShape = allShapes.find((shape) =>
+        isPointInShape(x, y, shape)
+      );
+
       if (clickedShape) {
         setSelectedShapeId(clickedShape.id);
         // Check if clicking on a resize handle
@@ -933,7 +1092,11 @@ function App() {
           setResizeHandle(handle);
         } else {
           // Calculate drag offset based on shape type
-          if (clickedShape.type === 'image' && clickedShape.width && clickedShape.height) {
+          if (
+            clickedShape.type === "image" &&
+            clickedShape.width &&
+            clickedShape.height
+          ) {
             // For images, use center point or top-left
             setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
           } else {
@@ -945,17 +1108,26 @@ function App() {
         setSelectedShapeId(null);
       }
       redrawCanvas();
-    } else if (['rectangle', 'circle', 'line', 'triangle'].includes(drawingMode)) {
+    } else if (
+      ["rectangle", "circle", "line", "triangle"].includes(drawingMode)
+    ) {
       setIsDrawingShape(true);
       setShapeStart({ x, y });
-    } else if (drawingMode === 'text' && currentRoom) {
-      console.log('Text mode activated at:', x, y);
+    } else if (drawingMode === "text" && currentRoom) {
+      console.log("Text mode activated at:", x, y);
       // If clicking inside an existing sticky (text with width/height), open it for editing
-      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
-      if (clickedShape && clickedShape.type === 'text' && clickedShape.width && clickedShape.height) {
+      const clickedShape = [...shapes]
+        .reverse()
+        .find((shape) => isPointInShape(x, y, shape));
+      if (
+        clickedShape &&
+        clickedShape.type === "text" &&
+        clickedShape.width &&
+        clickedShape.height
+      ) {
         // Edit the existing sticky's text
         setEditingTextId(clickedShape.id);
-        setEditingText(clickedShape.text || '');
+        setEditingText(clickedShape.text || "");
         // Ensure selection highlights the sticky
         setSelectedShapeId(clickedShape.id);
         redrawCanvas();
@@ -964,29 +1136,29 @@ function App() {
         const shapeId = generateShapeId();
         const newShape: Shape = {
           id: shapeId,
-          type: 'text',
+          type: "text",
           x,
           y,
           color: brushColor,
           size: brushSize,
           username: username,
-          text: '',
-          fontSize: 16
+          text: "",
+          fontSize: 16,
         };
 
-        setShapes(prev => {
+        setShapes((prev) => {
           const updated = [...prev, newShape];
           return updated;
         });
         setEditingTextId(shapeId);
-        setEditingText('');
+        setEditingText("");
 
         // Send the shape to server immediately so other clients can see it
         sendMessage({
-          type: 'addShape',
+          type: "addShape",
           roomId: currentRoom.roomId,
           shapeId: shapeId,
-          shape: newShape
+          shape: newShape,
         });
 
         // Force redraw after a short delay to ensure state is updated
@@ -1001,31 +1173,31 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
     const rect = canvas.getBoundingClientRect();
-    
+
     // Account for CSS scaling
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
-    const ctx = canvas.getContext('2d');
+
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    
-    if (drawingMode === 'eraser') {
+
+    if (drawingMode === "eraser") {
       // Eraser mode: check if erasing over any shapes and delete them
       const eraserWidth = getEraserSize();
       const eraserRadius = eraserWidth / 2;
-      
+
       // Check for shapes intersecting with the eraser path
       const shapesToDelete: string[] = [];
-      shapes.forEach(shape => {
+      shapes.forEach((shape) => {
         // Check multiple points along the eraser stroke
         const steps = 5;
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
           const checkX = lastPoint.current!.x + (x - lastPoint.current!.x) * t;
           const checkY = lastPoint.current!.y + (y - lastPoint.current!.y) * t;
-          
+
           // Check if this point of the eraser is touching the shape
           if (isShapeTouchedByEraser(checkX, checkY, eraserRadius, shape)) {
             if (!shapesToDelete.includes(shape.id)) {
@@ -1035,174 +1207,206 @@ function App() {
           }
         }
       });
-      
+
       // Delete shapes that were erased
       if (shapesToDelete.length > 0) {
-        setShapes(prev => prev.filter(shape => !shapesToDelete.includes(shape.id)));
-        shapesToDelete.forEach(shapeId => {
+        setShapes((prev) =>
+          prev.filter((shape) => !shapesToDelete.includes(shape.id))
+        );
+        shapesToDelete.forEach((shapeId) => {
           sendMessage({
-            type: 'deleteShape',
+            type: "deleteShape",
             roomId: currentRoom.roomId,
-            shapeId: shapeId
+            shapeId: shapeId,
           });
         });
         redrawCanvas();
       }
-      
+
       // Also erase pen strokes visually
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.strokeStyle = "rgba(0,0,0,1)";
       ctx.lineWidth = eraserWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
       ctx.lineTo(x, y);
       ctx.stroke();
-      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
-      
+      ctx.globalCompositeOperation = "source-over"; // Reset to normal
+
       // Send erase message to other users for pen strokes
       const points = [
-        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
-        { x, y, color: 'eraser', size: eraserWidth },
+        {
+          x: lastPoint.current.x,
+          y: lastPoint.current.y,
+          color: "eraser",
+          size: eraserWidth,
+        },
+        { x, y, color: "eraser", size: eraserWidth },
       ];
-      
+
       // Add points to current eraser stroke
-      setCurrentEraserStroke(prev => [...prev, ...points]);
-      
-      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+      setCurrentEraserStroke((prev) => [...prev, ...points]);
+
+      sendMessage({ type: "draw", roomId: currentRoom.roomId, points });
     } else {
       // Normal pen mode
       ctx.strokeStyle = brushColor;
       ctx.lineWidth = brushSize;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
       ctx.lineTo(x, y);
       ctx.stroke();
-      
+
       const points = [
-        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        {
+          x: lastPoint.current.x,
+          y: lastPoint.current.y,
+          color: brushColor,
+          size: brushSize,
+        },
         { x, y, color: brushColor, size: brushSize },
       ];
-      
+
       // Add points to current stroke
-      setCurrentStroke(prev => [...prev, ...points]);
-      
-      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+      setCurrentStroke((prev) => [...prev, ...points]);
+
+      sendMessage({ type: "draw", roomId: currentRoom.roomId, points });
     }
-    
+
     lastPoint.current = { x, y };
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !currentRoom) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    
+
     const rect = canvas.getBoundingClientRect();
-    
+
     // Account for CSS scaling
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
-    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
-    if ((drawingMode === 'pen' || drawingMode === 'eraser') && isDrawing && lastPoint.current) {
+    sendMessage({
+      type: "cursor",
+      roomId: currentRoom.roomId,
+      x,
+      y,
+      isDrawing,
+    });
+
+    if (
+      (drawingMode === "pen" || drawingMode === "eraser") &&
+      isDrawing &&
+      lastPoint.current
+    ) {
       // Draw freehand or erase
       draw(e);
-    } else if (drawingMode === 'select' && isDrawing && selectedShapeId) {
-      const shape = shapes.find(s => s.id === selectedShapeId);
+    } else if (drawingMode === "select" && isDrawing && selectedShapeId) {
+      const shape = shapes.find((s) => s.id === selectedShapeId);
       if (!shape) return;
 
       if (resizeHandle) {
         // Resize shape
         const updatedShape = { ...shape };
 
-        if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
-          if (resizeHandle.includes('t')) {
-            const newHeight = (shape.y + shape.height) - y;
+        if (
+          (shape.type === "rectangle" || shape.type === "image") &&
+          shape.width &&
+          shape.height
+        ) {
+          if (resizeHandle.includes("t")) {
+            const newHeight = shape.y + shape.height - y;
             if (newHeight > 5) {
               updatedShape.y = y;
               updatedShape.height = newHeight;
             }
           }
-          if (resizeHandle.includes('b')) {
+          if (resizeHandle.includes("b")) {
             updatedShape.height = Math.max(5, y - shape.y);
           }
-          if (resizeHandle.includes('l')) {
-            const newWidth = (shape.x + shape.width) - x;
+          if (resizeHandle.includes("l")) {
+            const newWidth = shape.x + shape.width - x;
             if (newWidth > 5) {
               updatedShape.x = x;
               updatedShape.width = newWidth;
             }
           }
-          if (resizeHandle.includes('r')) {
+          if (resizeHandle.includes("r")) {
             updatedShape.width = Math.max(5, x - shape.x);
           }
-        } else if (shape.type === 'circle' && shape.radius) {
+        } else if (shape.type === "circle" && shape.radius) {
           const dx = x - shape.x;
           const dy = y - shape.y;
           updatedShape.radius = Math.max(5, Math.sqrt(dx * dx + dy * dy));
-        } else if (shape.type === 'line' && shape.endX !== undefined && shape.endY !== undefined) {
-          if (resizeHandle === 'start') {
+        } else if (
+          shape.type === "line" &&
+          shape.endX !== undefined &&
+          shape.endY !== undefined
+        ) {
+          if (resizeHandle === "start") {
             updatedShape.x = x;
             updatedShape.y = y;
-          } else if (resizeHandle === 'end') {
+          } else if (resizeHandle === "end") {
             updatedShape.endX = x;
             updatedShape.endY = y;
           }
-        } else if (shape.type === 'triangle' && shape.width && shape.height) {
+        } else if (shape.type === "triangle" && shape.width && shape.height) {
           const dx = x - (shape.x + shape.width / 2);
           const dy = y - (shape.y + shape.height / 2);
           updatedShape.width = Math.max(10, Math.abs(dx) * 2);
           updatedShape.height = Math.max(10, Math.abs(dy) * 2);
         }
 
-        setShapes(prev => prev.map(s => s.id === selectedShapeId ? updatedShape : s));
+        setShapes((prev) =>
+          prev.map((s) => (s.id === selectedShapeId ? updatedShape : s))
+        );
         sendMessage({
-          type: 'updateShape',
+          type: "updateShape",
           roomId: currentRoom.roomId,
           shapeId: selectedShapeId,
-          updates: updatedShape
+          updates: updatedShape,
         });
         redrawCanvas();
       } else if (dragOffset) {
         // Drag selected shape
         const newX = x - dragOffset.x;
         const newY = y - dragOffset.y;
-        console.debug('dragging shape', { id: selectedShapeId, newX, newY });
+        console.debug("dragging shape", { id: selectedShapeId, newX, newY });
         // Update the entire shape object so text/content stays together with the sticky
-        setShapes(prev => prev.map(s =>
-          s.id === selectedShapeId
-            ? { ...s, x: newX, y: newY }
-            : s
-        ));
+        setShapes((prev) =>
+          prev.map((s) =>
+            s.id === selectedShapeId ? { ...s, x: newX, y: newY } : s
+          )
+        );
 
         // Find the updated shape to send the full object as updates (ensures text moves with sticky)
-        const updatedShape = shapes.find(s => s.id === selectedShapeId);
+        const updatedShape = shapes.find((s) => s.id === selectedShapeId);
         if (updatedShape) {
           const full = { ...updatedShape, x: newX, y: newY };
           sendMessage({
-            type: 'updateShape',
+            type: "updateShape",
             roomId: currentRoom.roomId,
             shapeId: selectedShapeId,
-            updates: full
+            updates: full,
           });
         } else {
           // fallback: send minimal update
           sendMessage({
-            type: 'updateShape',
+            type: "updateShape",
             roomId: currentRoom.roomId,
             shapeId: selectedShapeId,
-            updates: { x: newX, y: newY }
+            updates: { x: newX, y: newY },
           });
         }
-        
+
         redrawCanvas();
       }
     } else if (isDrawingShape && shapeStart) {
@@ -1210,7 +1414,7 @@ function App() {
       redrawCanvas();
       drawShapePreview(
         ctx,
-        drawingMode as 'rectangle' | 'circle' | 'line' | 'triangle',
+        drawingMode as "rectangle" | "circle" | "line" | "triangle",
         shapeStart.x,
         shapeStart.y,
         x,
@@ -1223,64 +1427,68 @@ function App() {
 
   const stopDrawing = () => {
     // Save current stroke if drawing with pen
-    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+    if (isDrawing && drawingMode === "pen" && currentStroke.length > 0) {
+      setStrokes((prev) => [...prev, { points: currentStroke }]);
       setCurrentStroke([]);
     }
-    
+
     // Save current eraser stroke if erasing
-    if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+    if (
+      isDrawing &&
+      drawingMode === "eraser" &&
+      currentEraserStroke.length > 0
+    ) {
+      setEraserStrokes((prev) => [...prev, { points: currentEraserStroke }]);
       setCurrentEraserStroke([]);
     }
-    
+
     if (isDrawingShape && shapeStart && canvasRef.current && currentRoom) {
       const rect = canvasRef.current.getBoundingClientRect();
-      const event = (window.event as MouseEvent);
+      const event = window.event as MouseEvent;
       const currentX = event.clientX - rect.left;
       const currentY = event.clientY - rect.top;
-      
+
       // Create the final shape
       const shapeId = generateShapeId();
       const newShape: Shape = {
         id: shapeId,
-        type: drawingMode as 'rectangle' | 'circle' | 'line' | 'triangle',
+        type: drawingMode as "rectangle" | "circle" | "line" | "triangle",
         x: shapeStart.x,
         y: shapeStart.y,
         color: brushColor,
         size: brushSize,
-        username: username
+        username: username,
       };
-      
+
       // Calculate dimensions based on shape type
-      if (drawingMode === 'rectangle' || drawingMode === 'triangle') {
+      if (drawingMode === "rectangle" || drawingMode === "triangle") {
         newShape.width = currentX - shapeStart.x;
         newShape.height = currentY - shapeStart.y;
-      } else if (drawingMode === 'circle') {
+      } else if (drawingMode === "circle") {
         const width = currentX - shapeStart.x;
         const height = currentY - shapeStart.y;
         newShape.radius = Math.sqrt(width * width + height * height);
-      } else if (drawingMode === 'line') {
+      } else if (drawingMode === "line") {
         newShape.endX = currentX;
         newShape.endY = currentY;
       }
-      
+
       // Add to local state
-      setShapes(prev => [...prev, newShape]);
-      
+      setShapes((prev) => [...prev, newShape]);
+
       // Send to server
       sendMessage({
-        type: 'addShape',
+        type: "addShape",
         roomId: currentRoom.roomId,
         shapeId: shapeId,
-        shape: newShape
+        shape: newShape,
       });
-      
+
       redrawCanvas();
       setIsDrawingShape(false);
       setShapeStart(null);
     }
-    
+
     setIsDrawing(false);
     setDragOffset(null);
     setResizeHandle(null);
@@ -1292,26 +1500,26 @@ function App() {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    
+
     // Account for CSS scaling
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
-    
+
     setIsDrawing(true);
     lastPoint.current = { x, y };
-    
+
     // Start pen stroke
-    if (drawingMode === 'pen') {
+    if (drawingMode === "pen") {
       setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
-    } else if (drawingMode === 'eraser') {
+    } else if (drawingMode === "eraser") {
       // Start eraser stroke
       const eraserWidth = getEraserSize();
-      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
+      setCurrentEraserStroke([{ x, y, color: "eraser", size: eraserWidth }]);
     }
   };
 
@@ -1319,34 +1527,34 @@ function App() {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
-    
+
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    
+
     // Account for CSS scaling
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
-    
-    const ctx = canvas.getContext('2d');
+
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    
-    if (drawingMode === 'eraser') {
+
+    if (drawingMode === "eraser") {
       // Eraser mode: check if erasing over any shapes and delete them
       const eraserWidth = getEraserSize();
       const eraserRadius = eraserWidth / 2;
-      
+
       // Check for shapes intersecting with the eraser path
       const shapesToDelete: string[] = [];
-      shapes.forEach(shape => {
+      shapes.forEach((shape) => {
         // Check multiple points along the eraser stroke
         const steps = 5;
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
           const checkX = lastPoint.current!.x + (x - lastPoint.current!.x) * t;
           const checkY = lastPoint.current!.y + (y - lastPoint.current!.y) * t;
-          
+
           // Check if this point of the eraser is touching the shape
           if (isShapeTouchedByEraser(checkX, checkY, eraserRadius, shape)) {
             if (!shapesToDelete.includes(shape.id)) {
@@ -1356,82 +1564,104 @@ function App() {
           }
         }
       });
-      
+
       // Delete shapes that were erased
       if (shapesToDelete.length > 0) {
-        setShapes(prev => prev.filter(shape => !shapesToDelete.includes(shape.id)));
-        shapesToDelete.forEach(shapeId => {
+        setShapes((prev) =>
+          prev.filter((shape) => !shapesToDelete.includes(shape.id))
+        );
+        shapesToDelete.forEach((shapeId) => {
           sendMessage({
-            type: 'deleteShape',
+            type: "deleteShape",
             roomId: currentRoom.roomId,
-            shapeId: shapeId
+            shapeId: shapeId,
           });
         });
         redrawCanvas();
       }
-      
+
       // Also erase pen strokes visually
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.strokeStyle = "rgba(0,0,0,1)";
       ctx.lineWidth = eraserWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
       ctx.lineTo(x, y);
       ctx.stroke();
-      ctx.globalCompositeOperation = 'source-over'; // Reset to normal
-      
+      ctx.globalCompositeOperation = "source-over"; // Reset to normal
+
       const points = [
-        { x: lastPoint.current.x, y: lastPoint.current.y, color: 'eraser', size: eraserWidth },
-        { x, y, color: 'eraser', size: eraserWidth },
+        {
+          x: lastPoint.current.x,
+          y: lastPoint.current.y,
+          color: "eraser",
+          size: eraserWidth,
+        },
+        { x, y, color: "eraser", size: eraserWidth },
       ];
-      
+
       // Add points to current eraser stroke
-      setCurrentEraserStroke(prev => [...prev, ...points]);
-      
-      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+      setCurrentEraserStroke((prev) => [...prev, ...points]);
+
+      sendMessage({ type: "draw", roomId: currentRoom.roomId, points });
     } else {
       // Normal pen mode
       ctx.strokeStyle = brushColor;
       ctx.lineWidth = brushSize;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(lastPoint.current.x, lastPoint.current.y);
       ctx.lineTo(x, y);
       ctx.stroke();
-      
+
       const points = [
-        { x: lastPoint.current.x, y: lastPoint.current.y, color: brushColor, size: brushSize },
+        {
+          x: lastPoint.current.x,
+          y: lastPoint.current.y,
+          color: brushColor,
+          size: brushSize,
+        },
         { x, y, color: brushColor, size: brushSize },
       ];
-      
+
       // Add points to current stroke
-      setCurrentStroke(prev => [...prev, ...points]);
-      sendMessage({ type: 'draw', roomId: currentRoom.roomId, points });
+      setCurrentStroke((prev) => [...prev, ...points]);
+      sendMessage({ type: "draw", roomId: currentRoom.roomId, points });
     }
-    
-    sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing: true });
-    
+
+    sendMessage({
+      type: "cursor",
+      roomId: currentRoom.roomId,
+      x,
+      y,
+      isDrawing: true,
+    });
+
     lastPoint.current = { x, y };
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    
+
     // Save current stroke if drawing with pen
-    if (isDrawing && drawingMode === 'pen' && currentStroke.length > 0) {
-      setStrokes(prev => [...prev, { points: currentStroke }]);
+    if (isDrawing && drawingMode === "pen" && currentStroke.length > 0) {
+      setStrokes((prev) => [...prev, { points: currentStroke }]);
       setCurrentStroke([]);
     }
-    
+
     // Save current eraser stroke if erasing
-    if (isDrawing && drawingMode === 'eraser' && currentEraserStroke.length > 0) {
-      setEraserStrokes(prev => [...prev, { points: currentEraserStroke }]);
+    if (
+      isDrawing &&
+      drawingMode === "eraser" &&
+      currentEraserStroke.length > 0
+    ) {
+      setEraserStrokes((prev) => [...prev, { points: currentEraserStroke }]);
       setCurrentEraserStroke([]);
     }
-    
+
     setIsDrawing(false);
     lastPoint.current = null;
   };
@@ -1441,23 +1671,33 @@ function App() {
       const apiUrl = `http://${window.location.hostname}:8081/api/boards`;
       const response = await fetch(`${apiUrl}/load/${boardId}`);
       const data = await response.json();
-      
+
       if (data.success && data.board) {
-        // Load shapes and strokes
+        console.log("Loading board:", data.board);
+        console.log("Strokes count:", data.board.strokes?.length || 0);
+        console.log(
+          "Eraser strokes count:",
+          data.board.eraserStrokes?.length || 0
+        );
+        console.log("Shapes count:", data.board.shapes?.length || 0);
+
+        // Clear existing drawings first
+        clearCanvas();
+
+        // Load shapes, strokes, and eraserStrokes
         setShapes(data.board.shapes || []);
         setStrokes(data.board.strokes || []);
-        // Clear existing drawings
-        clearCanvas();
-        // Redraw with loaded shapes and strokes
-        redrawCanvas();
+        setEraserStrokes(data.board.eraserStrokes || []);
+
+        // Redraw will happen automatically via useEffect when states update
       }
     } catch (error) {
-      console.error('Failed to load board:', error);
-      alert('Failed to load board');
+      console.error("Failed to load board:", error);
+      alert("Failed to load board");
     }
   };
 
-  if (view === 'login') {
+  if (view === "login") {
     return (
       <>
         <LoginView onLogin={handleLogin} />
@@ -1472,7 +1712,7 @@ function App() {
     );
   }
 
-  if (view === 'roomList') {
+  if (view === "roomList") {
     return (
       <>
         <RoomList
@@ -1500,7 +1740,7 @@ function App() {
     <>
       <Whiteboard
         canvasRef={canvasRef}
-        roomName={currentRoom?.roomName || 'Whiteboard'}
+        roomName={currentRoom?.roomName || "Whiteboard"}
         username={username}
         participants={currentRoom?.participants || 1}
         brushColor={brushColor}
@@ -1526,24 +1766,30 @@ function App() {
         onOpenBoardManager={() => setBoardManagerOpen(true)}
         onImageUploadSuccess={() => {
           setNotification({
-            message: '✅ Image uploaded successfully!',
-            type: 'success'
+            message: "✅ Image uploaded successfully!",
+            type: "success",
           });
         }}
         onImageUploadError={(error) => {
           setNotification({
             message: `❌ Image upload failed: ${error}`,
-            type: 'error'
+            type: "error",
           });
         }}
-        onNotify={(message, type, duration) => setNotification({ message, type, duration })}
+        onNotify={(message, type, duration) =>
+          setNotification({ message, type, duration })
+        }
         onAddStickyNote={handleAddStickyNote}
         shapes={shapes}
         selectedShapeId={selectedShapeId}
         onDeleteShape={(shapeId: string) => {
           if (!currentRoom) return;
-          setShapes(prev => prev.filter(s => s.id !== shapeId));
-          sendMessage({ type: 'deleteShape', roomId: currentRoom.roomId, shapeId });
+          setShapes((prev) => prev.filter((s) => s.id !== shapeId));
+          sendMessage({
+            type: "deleteShape",
+            roomId: currentRoom.roomId,
+            shapeId,
+          });
           setSelectedShapeId(null);
           redrawCanvas();
         }}
@@ -1551,11 +1797,12 @@ function App() {
       <BoardManager
         isOpen={boardManagerOpen}
         onClose={() => setBoardManagerOpen(false)}
-        currentRoomId={currentRoom?.roomId || ''}
+        currentRoomId={currentRoom?.roomId || ""}
         username={username}
         onLoadBoard={handleLoadBoard}
         shapes={shapes}
         strokes={strokes}
+        eraserStrokes={eraserStrokes}
       />
       {notification && (
         <Notification

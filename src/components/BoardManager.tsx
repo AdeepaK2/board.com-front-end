@@ -30,6 +30,7 @@ interface BoardManagerProps {
   onLoadBoard: (boardId: string) => void;
   shapes: Shape[];
   strokes: { points: DrawPoint[] }[];
+  eraserStrokes: { points: DrawPoint[] }[];
 }
 
 const API_URL = "http://" + window.location.hostname + ":8081/api/boards";
@@ -42,6 +43,7 @@ export const BoardManager = ({
   onLoadBoard,
   shapes,
   strokes,
+  eraserStrokes,
 }: BoardManagerProps) => {
   const [view, setView] = useState<"main" | "save" | "load" | "import">("main");
   const [boards, setBoards] = useState<BoardMetadata[]>([]);
@@ -92,6 +94,7 @@ export const BoardManager = ({
           username: username,
           shapes: shapes,
           strokes: strokes,
+          eraserStrokes: eraserStrokes,
         }),
       });
 
