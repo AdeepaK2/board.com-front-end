@@ -454,6 +454,10 @@ function App() {
       case 'shapeAdded':
         // Handle image upload broadcast - specifically for IMAGE shapeType
         if (message.payload && message.payload.shapeType === 'IMAGE' && message.payload.url) {
+          const imageUrl = message.payload.url; // Store in const to avoid undefined issues
+          const imageWidth = message.payload.width;
+          const imageHeight = message.payload.height;
+          
           // Create image shape with dimensions from payload (backend provides actual dimensions)
           const imageShape: Shape = {
             id: generateShapeId(),
@@ -463,20 +467,20 @@ function App() {
             color: '#000000',
             size: 1,
             username: username || 'system',
-            url: message.payload.url,
-            width: message.payload.width || 200,
-            height: message.payload.height || 200,
+            url: imageUrl,
+            width: imageWidth || 200,
+            height: imageHeight || 200,
           };
           
           // Preload image into cache if not already loaded
-          if (!imageCache.current.has(message.payload.url)) {
+          if (!imageCache.current.has(imageUrl)) {
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            img.src = message.payload.url;
+            img.src = imageUrl;
             img.onload = () => {
-              imageCache.current.set(message.payload.url, img);
+              imageCache.current.set(imageUrl, img);
               // If dimensions weren't provided, update with actual image dimensions
-              if (!message.payload.width || !message.payload.height) {
+              if (!imageWidth || !imageHeight) {
                 setShapes(prev => prev.map(s => 
                   s.id === imageShape.id 
                     ? { ...s, width: img.width, height: img.height }
@@ -486,16 +490,16 @@ function App() {
               redrawCanvas();
             };
             img.onerror = () => {
-              console.error('Failed to load image:', message.payload.url);
+              console.error('Failed to load image:', imageUrl);
             };
-            imageCache.current.set(message.payload.url, img);
+            imageCache.current.set(imageUrl, img);
           }
           
           setShapes(prev => {
             // Avoid duplicates - check if image with same URL already exists at this position
             const exists = prev.some(s => 
               s.type === 'image' && 
-              s.url === message.payload.url &&
+              s.url === imageUrl &&
               Math.abs(s.x - imageShape.x) < 50 &&
               Math.abs(s.y - imageShape.y) < 50
             );
@@ -879,11 +883,15 @@ function App() {
   };
 
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !currentRoom) return;
+    const rect = canvas.getBoundingClientRect();
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Get canvas coordinates accounting for scroll and CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     if (drawingMode === 'pen') {
       setIsDrawing(true);
@@ -911,28 +919,19 @@ function App() {
         redrawCanvas();
       }
     } else if (drawingMode === 'select') {
-<<<<<<< HEAD
       // Check if clicking on a shape (check images last so they're on top)
       const nonImageShapes = shapes.filter(s => s.type !== 'image');
       const imageShapes = shapes.filter(s => s.type === 'image');
       const allShapes = [...nonImageShapes, ...imageShapes].reverse();
       const clickedShape = allShapes.find(shape => isPointInShape(x, y, shape));
       
-=======
-      // Check if clicking on a shape
-      const clickedShape = [...shapes].reverse().find(shape => isPointInShape(x, y, shape));
-      console.debug('select mode mousedown at', { x, y, found: !!clickedShape });
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
       if (clickedShape) {
-        console.debug('clicked shape', { id: clickedShape.id, type: clickedShape.type, x: clickedShape.x, y: clickedShape.y, width: clickedShape.width, height: clickedShape.height });
         setSelectedShapeId(clickedShape.id);
         // Check if clicking on a resize handle
         const handle = getResizeHandle(clickedShape, x, y);
         if (handle) {
-          console.debug('resize handle', handle);
           setResizeHandle(handle);
         } else {
-<<<<<<< HEAD
           // Calculate drag offset based on shape type
           if (clickedShape.type === 'image' && clickedShape.width && clickedShape.height) {
             // For images, use center point or top-left
@@ -940,11 +939,6 @@ function App() {
           } else {
             setDragOffset({ x: x - clickedShape.x, y: y - clickedShape.y });
           }
-=======
-          const offset = { x: x - clickedShape.x, y: y - clickedShape.y };
-          console.debug('set drag offset', offset);
-          setDragOffset(offset);
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
         }
         setIsDrawing(true);
       } else {
@@ -1007,8 +1001,13 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas || !isDrawing || !lastPoint.current || !currentRoom) return;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
@@ -1098,15 +1097,18 @@ function App() {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !currentRoom) return;
-    
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
+    if (!canvas || !currentRoom) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
     
     sendMessage({ type: 'cursor', roomId: currentRoom.roomId, x, y, isDrawing });
 
@@ -1288,22 +1290,28 @@ function App() {
   // Touch event handlers for mobile/tablet support
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
     const touch = e.touches[0];
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      setIsDrawing(true);
-      lastPoint.current = { x, y };
-      
-      // Start pen stroke
-      if (drawingMode === 'pen') {
-        setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
-      } else if (drawingMode === 'eraser') {
-        // Start eraser stroke
-        const eraserWidth = getEraserSize();
-        setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
-      }
+    const rect = canvas.getBoundingClientRect();
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
+    
+    setIsDrawing(true);
+    lastPoint.current = { x, y };
+    
+    // Start pen stroke
+    if (drawingMode === 'pen') {
+      setCurrentStroke([{ x, y, color: brushColor, size: brushSize }]);
+    } else if (drawingMode === 'eraser') {
+      // Start eraser stroke
+      const eraserWidth = getEraserSize();
+      setCurrentEraserStroke([{ x, y, color: 'eraser', size: eraserWidth }]);
     }
   };
 
@@ -1314,8 +1322,12 @@ function App() {
     
     const touch = e.touches[0];
     const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
+    
+    // Account for CSS scaling
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -1497,6 +1509,7 @@ function App() {
         connectionStatus={connectionStatus}
         drawingMode={drawingMode}
         userCursors={userCursors}
+        socket={wsRef.current}
         onBrushColorChange={setBrushColor}
         onBrushSizeChange={setBrushSize}
         onEraserSizeChange={setEraserSize}
@@ -1511,7 +1524,6 @@ function App() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onOpenBoardManager={() => setBoardManagerOpen(true)}
-<<<<<<< HEAD
         onImageUploadSuccess={() => {
           setNotification({
             message: '✅ Image uploaded successfully!',
@@ -1523,7 +1535,7 @@ function App() {
             message: `❌ Image upload failed: ${error}`,
             type: 'error'
           });
-=======
+        }}
         onNotify={(message, type, duration) => setNotification({ message, type, duration })}
         onAddStickyNote={handleAddStickyNote}
         shapes={shapes}
@@ -1534,7 +1546,6 @@ function App() {
           sendMessage({ type: 'deleteShape', roomId: currentRoom.roomId, shapeId });
           setSelectedShapeId(null);
           redrawCanvas();
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
         }}
       />
       <BoardManager

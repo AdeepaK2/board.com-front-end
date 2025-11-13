@@ -52,3 +52,10 @@ export interface UserCursor {
   username: string;
   isDrawing: boolean;
 }
+
+export interface ChatMessage {
+  type: 'CHAT' | 'USER_JOINED' | 'USER_LEFT' | 'SYSTEM';
+  username: string;
+  message: string;
+  timestamp: number;
+}

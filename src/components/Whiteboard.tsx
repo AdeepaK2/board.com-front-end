@@ -1,12 +1,8 @@
 import { useState } from 'react';
-import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type, Image } from 'lucide-react';
+import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
 import './Whiteboard.css';
-<<<<<<< HEAD
-import type { DrawingMode } from '../types';
-import { ImageUploadTool } from './ImageUploadTool';
-=======
 import type { DrawingMode, Shape } from '../types';
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
+import { ChatPanel } from './ChatPanel';
 
 interface WhiteboardProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -19,6 +15,7 @@ interface WhiteboardProps {
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
+  socket?: WebSocket | null;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
   onEraserSizeChange: (size: number) => void;
@@ -33,16 +30,13 @@ interface WhiteboardProps {
   onTouchMove: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onTouchEnd: (e: React.TouchEvent<HTMLCanvasElement>) => void;
   onOpenBoardManager: () => void;
-<<<<<<< HEAD
   onImageUploadSuccess?: () => void;
   onImageUploadError?: (error: string) => void;
-=======
   onNotify?: (message: string, type: 'success' | 'error' | 'info', duration?: number) => void;
   onAddStickyNote?: (color?: string) => void;
   shapes?: Shape[];
   selectedShapeId?: string | null;
   onDeleteShape?: (shapeId: string) => void;
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 }
 
 export const Whiteboard = ({
@@ -56,6 +50,7 @@ export const Whiteboard = ({
   connectionStatus,
   drawingMode,
   userCursors,
+  socket,
   onBrushColorChange,
   onBrushSizeChange,
   onEraserSizeChange,
@@ -70,26 +65,20 @@ export const Whiteboard = ({
   onTouchMove,
   onTouchEnd,
   onOpenBoardManager,
-<<<<<<< HEAD
-  onImageUploadSuccess,
-  onImageUploadError,
-=======
+  // onImageUploadSuccess,
+  // onImageUploadError,
   onNotify,
   onAddStickyNote,
   shapes,
   selectedShapeId,
   onDeleteShape,
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 }: WhiteboardProps) => {
   // popup visibility is determined by drawingMode === 'sticky'
   const [showShapesDropdown, setShowShapesDropdown] = useState(false);
-<<<<<<< HEAD
-  const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
-=======
+  // const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [downloadFilename, setDownloadFilename] = useState('');
   const [downloadFormat, setDownloadFormat] = useState<'png' | 'jpeg'>('png');
   const [downloadOpen, setDownloadOpen] = useState(false);
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 
   const shapeTools = [
     { mode: 'rectangle' as DrawingMode, icon: Square, label: 'Rectangle' },
@@ -231,7 +220,7 @@ export const Whiteboard = ({
           >
             <Type size={18} />
           </button>
-<<<<<<< HEAD
+          {/* Image upload temporarily disabled - ImageUploadTool component not available
           <button 
             className="tool-btn"
             onClick={() => setIsImageUploadOpen(true)}
@@ -239,7 +228,7 @@ export const Whiteboard = ({
           >
             <Image size={18} />
           </button>
-=======
+          */}
           {/* Sticky button placed next to Text tool so toolbar order remains consistent */}
           <div className="sticky-dropdown" style={{ position: 'relative' }}>
             <button
@@ -283,7 +272,6 @@ export const Whiteboard = ({
               </div>
             )}
           </div>
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
         </div>
 
   <div className="toolbar-section controls" style={{ position: 'relative' }}>
@@ -508,13 +496,11 @@ export const Whiteboard = ({
         </span>
       </div>
 
-      {/* Image Upload Tool */}
-      <ImageUploadTool
-        isOpen={isImageUploadOpen}
-        onClose={() => setIsImageUploadOpen(false)}
-        roomName={roomName}
-        onUploadSuccess={onImageUploadSuccess}
-        onUploadError={onImageUploadError}
+      {/* Chat Panel */}
+      <ChatPanel 
+        socket={socket || null} 
+        username={username}
+        isVisible={true}
       />
     </div>
   );

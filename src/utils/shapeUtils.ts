@@ -140,7 +140,6 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
 }
 
 /**
-<<<<<<< HEAD
  * Draw placeholder for image while loading
  */
 function drawImagePlaceholder(ctx: CanvasRenderingContext2D, shape: Shape) {
@@ -159,7 +158,9 @@ function drawImagePlaceholder(ctx: CanvasRenderingContext2D, shape: Shape) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('Loading...', shape.x + shape.width / 2, shape.y + shape.height / 2);
-=======
+}
+
+/**
  * Wrap text into lines that fit within maxWidth using the provided canvas context.
  * Returns an array of lines.
  */
@@ -200,7 +201,6 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   }
   if (current) lines.push(current);
   return lines;
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
 }
 
 /**
@@ -545,11 +545,7 @@ export function getResizeHandle(shape: Shape, x: number, y: number): string | nu
   const handleSize = 8;
   const tolerance = handleSize / 2;
 
-<<<<<<< HEAD
-  if ((shape.type === 'rectangle' || shape.type === 'image') && shape.width && shape.height) {
-=======
-  if ((shape.type === 'rectangle' || shape.type === 'text') && shape.width && shape.height) {
->>>>>>> 858c87b3b0d977ff312f2bbe197afb604f79b708
+  if ((shape.type === 'rectangle' || shape.type === 'image' || shape.type === 'text') && shape.width && shape.height) {
     const handles = [
       {key: 'tl', x: shape.x, y: shape.y},
       {key: 'tr', x: shape.x + shape.width, y: shape.y},
