@@ -1560,7 +1560,8 @@ function App() {
           setSelectedShapeId(null);
           redrawCanvas();
         }}
-      />
+
+/>
       <BoardManager
         isOpen={boardManagerOpen}
         onClose={() => setBoardManagerOpen(false)}
