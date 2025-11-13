@@ -1352,6 +1352,7 @@ function App() {
         connectionStatus={connectionStatus}
         drawingMode={drawingMode}
         userCursors={userCursors}
+        socket={wsRef.current}
         onBrushColorChange={setBrushColor}
         onBrushSizeChange={setBrushSize}
         onEraserSizeChange={setEraserSize}

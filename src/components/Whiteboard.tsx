@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Eraser, Palette, Users, LogOut, MousePointer2, Square, Circle, Minus, Triangle, PaintBucket, FolderOpen, ChevronDown, Shapes, Type } from 'lucide-react';
 import './Whiteboard.css';
 import type { DrawingMode, Shape } from '../types';
+import { ChatPanel } from './ChatPanel';
 
 interface WhiteboardProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -14,6 +15,7 @@ interface WhiteboardProps {
   connectionStatus: string;
   drawingMode: DrawingMode;
   userCursors: Map<string, { username: string; x: number; y: number; isDrawing: boolean }>;
+  socket?: WebSocket | null;
   onBrushColorChange: (color: string) => void;
   onBrushSizeChange: (size: number) => void;
   onEraserSizeChange: (size: number) => void;
@@ -46,6 +48,7 @@ export const Whiteboard = ({
   connectionStatus,
   drawingMode,
   userCursors,
+  socket,
   onBrushColorChange,
   onBrushSizeChange,
   onEraserSizeChange,
@@ -478,6 +481,13 @@ export const Whiteboard = ({
           💡 Draw with mouse or touch • Change colors and sizes • Real-time collaboration
         </span>
       </div>
+
+      {/* Chat Panel */}
+      <ChatPanel 
+        socket={socket || null} 
+        username={username}
+        isVisible={true}
+      />
     </div>
   );
 };
